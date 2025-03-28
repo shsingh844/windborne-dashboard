@@ -1,0 +1,629 @@
+{% extends "base.html" %}
+
+{% block title %}Analytics - Windborne Constellation Tracker{% endblock %}
+
+{% block extra_css %}
+<style>
+    .chart-container {
+        height: 400px;
+        position: relative;
+    }
+    
+    .metric-card {
+        transition: transform 0.3s ease;
+    }
+    
+    .metric-card:hover {
+        transform: translateY(-5px);
+    }
+    
+    .metric-value {
+        font-size: 2rem;
+        font-weight: bold;
+    }
+    
+    .metric-label {
+        font-size: 0.9rem;
+        color: #6c757d;
+    }
+    
+    #balloon-data-table {
+        font-size: 0.9rem;
+    }
+    
+    .time-filter-btn.active {
+        background-color: #0d6efd;
+        color: white;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center">
+            <h1>Constellation Analytics</h1>
+            <div>
+                <button id="refresh-analytics-btn" class="btn btn-outline-primary">
+                    <i class="bi bi-arrow-clockwise"></i> Refresh
+                </button>
+                <small id="last-updated" class="text-muted ms-2">Last updated: Loading...</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card metric-card h-100">
+            <div class="card-body text-center">
+                <h5 class="card-title">Avg. Trajectory Length</h5>
+                <div class="metric-value" id="avg-trajectory-length">-</div>
+                <div class="metric-label">Kilometers per balloon</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card metric-card h-100">
+            <div class="card-body text-center">
+                <h5 class="card-title">Max Recorded Speed</h5>
+                <div class="metric-value" id="max-speed">-</div>
+                <div class="metric-label">Kilometers per hour</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card metric-card h-100">
+            <div class="card-body text-center">
+                <h5 class="card-title">Altitude Range</h5>
+                <div class="metric-value" id="altitude-range">-</div>
+                <div class="metric-label">Meters (min-max)</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card metric-card h-100">
+            <div class="card-body text-center">
+                <h5 class="card-title">Balloon Clusters</h5>
+                <div class="metric-value" id="cluster-count">-</div>
+                <div class="metric-label">Geographic groupings</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">Altitude vs. Speed Correlation</h5>
+                    <div class="btn-group" role="group" aria-label="Time filter">
+                        <button type="button" class="btn btn-outline-secondary time-filter-btn active" data-hours="24">24h</button>
+                        <button type="button" class="btn btn-outline-secondary time-filter-btn" data-hours="12">12h</button>
+                        <button type="button" class="btn btn-outline-secondary time-filter-btn" data-hours="6">6h</button>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <canvas id="altitude-speed-chart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Movement Direction Distribution</h5>
+            </div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <canvas id="direction-chart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Speed Distribution</h5>
+            </div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <canvas id="speed-chart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">Balloon Data</h5>
+                    <div class="input-group" style="max-width: 300px;">
+                        <input type="text" class="form-control" id="table-search" placeholder="Search...">
+                        <button class="btn btn-outline-secondary" type="button" id="table-search-btn">
+                            <i class="bi bi-search"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover" id="balloon-data-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Status</th>
+                                <th>Current Position</th>
+                                <th>Altitude (m)</th>
+                                <th>Avg. Speed (km/h)</th>
+                                <th>Direction</th>
+                                <th>Distance (km)</th>
+                                <th>Last Update</th>
+                            </tr>
+                        </thead>
+                        <tbody id="balloon-table-body">
+                            <tr>
+                                <td colspan="8" class="text-center">Loading data...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Chart.js global configuration
+    Chart.defaults.color = '#6c757d';
+    Chart.defaults.font.family = 'system-ui, -apple-system, sans-serif';
+    
+    // Global variables
+    let balloonData = null;
+    let altitudeSpeedChart = null;
+    let directionChart = null;
+    let speedChart = null;
+    let selectedTimeFilter = 24; // Default to 24 hours
+    
+    // Function to update analytics with latest data
+    async function updateAnalytics() {
+        try {
+            // Fetch balloon data from our API
+            const response = await fetch('/api/balloons');
+            balloonData = await response.json();
+            
+            if (!balloonData) {
+                console.error('No data received from API');
+                return;
+            }
+            
+            // Update last updated time
+            document.getElementById('last-updated').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+            
+            // Update summary metrics
+            updateSummaryMetrics();
+            
+            // Update charts
+            updateAltitudeSpeedChart();
+            updateDirectionChart();
+            updateSpeedChart();
+            
+            // Update balloon data table
+            updateBalloonTable();
+            
+        } catch (error) {
+            console.error('Error updating analytics:', error);
+        }
+    }
+    
+    // Function to update summary metrics
+    function updateSummaryMetrics() {
+        if (!balloonData || !balloonData.balloons || balloonData.balloons.length === 0) return;
+        
+        // Calculate average trajectory length
+        let totalDistance = 0;
+        let balloonsWithDistance = 0;
+        
+        balloonData.balloons.forEach(balloon => {
+            if (balloon.total_distance) {
+                totalDistance += balloon.total_distance;
+                balloonsWithDistance++;
+            }
+        });
+        
+        const avgTrajectoryLength = balloonsWithDistance > 0 ? 
+            totalDistance / balloonsWithDistance : 0;
+        
+        document.getElementById('avg-trajectory-length').textContent = 
+            avgTrajectoryLength.toFixed(1);
+        
+        // Find maximum speed
+        let maxSpeed = 0;
+        
+        balloonData.balloons.forEach(balloon => {
+            if (balloon.max_speed && balloon.max_speed > maxSpeed) {
+                maxSpeed = balloon.max_speed;
+            }
+        });
+        
+        document.getElementById('max-speed').textContent = maxSpeed.toFixed(1);
+        
+        // Calculate altitude range
+        let minAltitude = Number.MAX_VALUE;
+        let maxAltitude = 0;
+        
+        balloonData.balloons.forEach(balloon => {
+            if (balloon.latest && balloon.latest.alt !== undefined) {
+                minAltitude = Math.min(minAltitude, balloon.latest.alt);
+                maxAltitude = Math.max(maxAltitude, balloon.latest.alt);
+            }
+        });
+        
+        if (minAltitude !== Number.MAX_VALUE) {
+            document.getElementById('altitude-range').textContent = 
+                `${Math.round(minAltitude).toLocaleString()}-${Math.round(maxAltitude).toLocaleString()}`;
+        } else {
+            document.getElementById('altitude-range').textContent = 'N/A';
+        }
+        
+        // Show cluster count
+        const clusterCount = balloonData.clusters ? Object.keys(balloonData.clusters).length : 0;
+        document.getElementById('cluster-count').textContent = clusterCount;
+    }
+    
+    // Function to update altitude vs speed chart
+    function updateAltitudeSpeedChart() {
+        if (!balloonData || !balloonData.balloons || balloonData.balloons.length === 0) return;
+        
+        // Prepare data
+        const dataPoints = [];
+        
+        balloonData.balloons.forEach(balloon => {
+            // Skip if missing required data
+            if (!balloon.latest || balloon.latest.alt === undefined || !balloon.avg_speed) return;
+            
+            // Skip if outside the selected time range
+            if (balloon.latest.timestamp && 
+                (Date.now() / 1000 - balloon.latest.timestamp) > selectedTimeFilter * 3600) return;
+            
+            dataPoints.push({
+                x: balloon.latest.alt,  // altitude
+                y: balloon.avg_speed,   // speed
+                r: 5 + (balloon.history_points || 1) / 2,  // bubble size based on data points
+                id: balloon.id,
+                lat: balloon.latest.lat,
+                lon: balloon.latest.lon
+            });
+        });
+        
+        // Create or update chart
+        const ctx = document.getElementById('altitude-speed-chart').getContext('2d');
+        
+        if (altitudeSpeedChart) {
+            altitudeSpeedChart.data.datasets[0].data = dataPoints;
+            altitudeSpeedChart.update();
+        } else {
+            altitudeSpeedChart = new Chart(ctx, {
+                type: 'bubble',
+                data: {
+                    datasets: [{
+                        label: 'Balloons',
+                        data: dataPoints,
+                        backgroundColor: 'rgba(54, 162, 235, 0.7)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Altitude (meters)'
+                            },
+                            min: 0
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Average Speed (km/h)'
+                            },
+                            min: 0
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const point = context.raw;
+                                    return [
+                                        `Balloon: ${point.id}`,
+                                        `Altitude: ${point.x.toLocaleString()} m`,
+                                        `Speed: ${point.y.toFixed(1)} km/h`,
+                                        `Position: ${point.lat.toFixed(4)}, ${point.lon.toFixed(4)}`
+                                    ];
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
+    
+    // Function to update direction distribution chart
+    function updateDirectionChart() {
+        if (!balloonData || !balloonData.balloons || balloonData.balloons.length === 0) return;
+        
+        // Count balloons in each direction
+        const directions = {
+            'N': 0, 'NE': 0, 'E': 0, 'SE': 0, 
+            'S': 0, 'SW': 0, 'W': 0, 'NW': 0
+        };
+        
+        let totalWithDirection = 0;
+        
+        balloonData.balloons.forEach(balloon => {
+            if (balloon.direction && directions[balloon.direction] !== undefined) {
+                directions[balloon.direction]++;
+                totalWithDirection++;
+            }
+        });
+        
+        // Convert to percentages
+        const directionData = Object.values(directions).map(count => 
+            totalWithDirection > 0 ? (count / totalWithDirection) * 100 : 0
+        );
+        
+        // Create or update chart
+        const ctx = document.getElementById('direction-chart').getContext('2d');
+        
+        if (directionChart) {
+            directionChart.data.datasets[0].data = directionData;
+            directionChart.update();
+        } else {
+            directionChart = new Chart(ctx, {
+                type: 'radar',
+                data: {
+                    labels: Object.keys(directions),
+                    datasets: [{
+                        label: 'Direction Distribution (%)',
+                        data: directionData,
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1,
+                        pointBackgroundColor: 'rgba(75, 192, 192, 1)'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        r: {
+                            angleLines: {
+                                display: true
+                            },
+                            suggestedMin: 0,
+                            suggestedMax: 100
+                        }
+                    }
+                }
+            });
+        }
+    }
+    
+    // Function to update speed distribution chart
+    function updateSpeedChart() {
+        if (!balloonData || !balloonData.balloons || balloonData.balloons.length === 0) return;
+        
+        // Collect speed data
+        const speeds = [];
+        
+        balloonData.balloons.forEach(balloon => {
+            if (balloon.avg_speed) {
+                speeds.push(balloon.avg_speed);
+            }
+        });
+        
+        if (speeds.length === 0) return;
+        
+        // Create speed ranges
+        const speedRanges = {
+            '0-25': 0,
+            '25-50': 0,
+            '50-75': 0,
+            '75-100': 0,
+            '100+': 0
+        };
+        
+        speeds.forEach(speed => {
+            if (speed < 25) {
+                speedRanges['0-25']++;
+            } else if (speed < 50) {
+                speedRanges['25-50']++;
+            } else if (speed < 75) {
+                speedRanges['50-75']++;
+            } else if (speed < 100) {
+                speedRanges['75-100']++;
+            } else {
+                speedRanges['100+']++;
+            }
+        });
+        
+        // Create or update chart
+        const ctx = document.getElementById('speed-chart').getContext('2d');
+        
+        if (speedChart) {
+            speedChart.data.datasets[0].data = Object.values(speedRanges);
+            speedChart.update();
+        } else {
+            speedChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(speedRanges),
+                    datasets: [{
+                        label: 'Number of Balloons',
+                        data: Object.values(speedRanges),
+                        backgroundColor: [
+                            'rgba(54, 162, 235, 0.7)',
+                            'rgba(75, 192, 192, 0.7)',
+                            'rgba(153, 102, 255, 0.7)',
+                            'rgba(255, 159, 64, 0.7)',
+                            'rgba(255, 99, 132, 0.7)'
+                        ],
+                        borderColor: [
+                            'rgba(54, 162, 235, 1)',
+                            'rgba(75, 192, 192, 1)',
+                            'rgba(153, 102, 255, 1)',
+                            'rgba(255, 159, 64, 1)',
+                            'rgba(255, 99, 132, 1)'
+                        ],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Number of Balloons'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Speed Range (km/h)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
+    
+    // Function to update balloon data table
+    function updateBalloonTable() {
+        if (!balloonData || !balloonData.balloons || balloonData.balloons.length === 0) {
+            document.getElementById('balloon-table-body').innerHTML = 
+                '<tr><td colspan="8" class="text-center">No balloon data available</td></tr>';
+            return;
+        }
+        
+        // Get search term
+        const searchTerm = document.getElementById('table-search').value.toLowerCase();
+        
+        // Sort balloons by ID
+        const sortedBalloons = [...balloonData.balloons].sort((a, b) => {
+            return a.id.localeCompare(b.id, undefined, { numeric: true });
+        });
+        
+        // Filter by search term if provided
+        const filteredBalloons = searchTerm ? 
+            sortedBalloons.filter(balloon => {
+                // Search in ID, position, or direction
+                return balloon.id.toLowerCase().includes(searchTerm) || 
+                       (balloon.latest && balloon.latest.lat && balloon.latest.lon && 
+                        `${balloon.latest.lat},${balloon.latest.lon}`.includes(searchTerm)) ||
+                       (balloon.direction && balloon.direction.toLowerCase().includes(searchTerm));
+            }) : 
+            sortedBalloons;
+        
+        // Build table rows
+        let tableHtml = '';
+        
+        filteredBalloons.forEach(balloon => {
+            const isActive = balloon.latest && balloon.latest.timestamp && 
+                             (Date.now() / 1000 - balloon.latest.timestamp) < 7200; // 2 hours
+            
+            const lastUpdate = balloon.latest && balloon.latest.timestamp ? 
+                new Date(balloon.latest.timestamp * 1000).toLocaleString() : 'Unknown';
+            
+            tableHtml += `
+                <tr>
+                    <td>${balloon.id}</td>
+                    <td><span class="badge ${isActive ? 'bg-success' : 'bg-danger'}">${isActive ? 'Active' : 'Inactive'}</span></td>
+                    <td>${balloon.latest && balloon.latest.lat && balloon.latest.lon ? 
+                         `${balloon.latest.lat.toFixed(4)}, ${balloon.latest.lon.toFixed(4)}` : 'Unknown'}</td>
+                    <td>${balloon.latest && balloon.latest.alt !== undefined ? 
+                         balloon.latest.alt.toLocaleString() : 'Unknown'}</td>
+                    <td>${balloon.avg_speed ? balloon.avg_speed.toFixed(1) : 'Unknown'}</td>
+                    <td>${balloon.direction || 'Unknown'}</td>
+                    <td>${balloon.total_distance ? balloon.total_distance.toFixed(1) : 'Unknown'}</td>
+                    <td>${lastUpdate}</td>
+                </tr>
+            `;
+        });
+        
+        if (tableHtml === '') {
+            tableHtml = '<tr><td colspan="8" class="text-center">No matching balloons found</td></tr>';
+        }
+        
+        document.getElementById('balloon-table-body').innerHTML = tableHtml;
+    }
+    
+    // Event listeners for time filter buttons
+    document.querySelectorAll('.time-filter-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            // Update active state
+            document.querySelectorAll('.time-filter-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            
+            // Update selected time filter
+            selectedTimeFilter = parseInt(this.dataset.hours, 10);
+            
+            // Update charts
+            updateAltitudeSpeedChart();
+        });
+    });
+    
+    // Event listener for table search
+    document.getElementById('table-search-btn').addEventListener('click', function() {
+        updateBalloonTable();
+    });
+    
+    document.getElementById('table-search').addEventListener('keyup', function(event) {
+        if (event.key === 'Enter') {
+            updateBalloonTable();
+        }
+    });
+    
+    // Refresh button
+    document.getElementById('refresh-analytics-btn').addEventListener('click', async function() {
+        this.disabled = true;
+        document.getElementById('last-updated').textContent = 'Refreshing data...';
+        
+        // Request data refresh
+        await fetch('/api/refresh');
+        
+        // Wait a moment for refresh to complete
+        setTimeout(() => {
+            updateAnalytics();
+            this.disabled = false;
+        }, 2000);
+    });
+    
+    // Initialize analytics on page load
+    document.addEventListener('DOMContentLoaded', () => {
+        updateAnalytics();
+        
+        // Set up periodic refresh every 5 minutes
+        setInterval(updateAnalytics, 5 * 60 * 1000);
+    });
+</script>
+{% endblock %}

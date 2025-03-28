@@ -1,0 +1,426 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Windborne Constellation Tracker{% endblock %}
+
+{% block extra_css %}
+<style>
+    .dashboard-card {
+        transition: transform 0.3s ease;
+    }
+    .dashboard-card:hover {
+        transform: translateY(-5px);
+    }
+    #last-updated {
+        font-size: 0.8rem;
+    }
+    .stat-value {
+        font-size: 2rem;
+        font-weight: bold;
+    }
+    .stat-label {
+        font-size: 0.9rem;
+        color: #6c757d;
+    }
+    #refresh-btn {
+        cursor: pointer;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center">
+            <h1>Constellation Dashboard</h1>
+            <div>
+                <button id="refresh-btn" class="btn btn-outline-primary">
+                    <i class="bi bi-arrow-clockwise"></i> Refresh Data
+                </button>
+                <small id="last-updated" class="text-muted ms-2">Last updated: Loading...</small>
+            </div>
+        </div>
+        <p class="lead">Real-time tracking and analysis of Windborne's global sounding balloon constellation.</p>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card dashboard-card h-100">
+            <div class="card-body text-center">
+                <h5 class="card-title">Total Balloons</h5>
+                <div class="stat-value" id="total-balloons">-</div>
+                <div class="stat-label">Tracked in last 24 hours</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card dashboard-card h-100">
+            <div class="card-body text-center">
+                <h5 class="card-title">Active Balloons</h5>
+                <div class="stat-value" id="active-balloons">-</div>
+                <div class="stat-label">Currently operational</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card dashboard-card h-100">
+            <div class="card-body text-center">
+                <h5 class="card-title">Avg. Altitude</h5>
+                <div class="stat-value" id="avg-altitude">-</div>
+                <div class="stat-label">Meters above sea level</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card dashboard-card h-100">
+            <div class="card-body text-center">
+                <h5 class="card-title">Avg. Speed</h5>
+                <div class="stat-value" id="avg-speed">-</div>
+                <div class="stat-label">Kilometers per hour</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-8">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Global Balloon Distribution</h5>
+            </div>
+            <div class="card-body">
+                <div id="mini-map" style="height: 400px;"></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Wind Patterns</h5>
+            </div>
+            <div class="card-body">
+                <div id="wind-patterns">
+                    <div class="placeholder-glow mb-3">
+                        <div class="ph-item">
+                            <div class="ph-col-12">
+                                <div class="ph-row">
+                                    <div class="ph-col-6 big"></div>
+                                    <div class="ph-col-6 empty"></div>
+                                    <div class="ph-col-8"></div>
+                                    <div class="ph-col-4 empty"></div>
+                                    <div class="ph-col-12"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Altitude Distribution</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="altitude-chart" height="250"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Balloon Clusters</h5>
+            </div>
+            <div class="card-body">
+                <div id="clusters-info">
+                    <p class="text-muted">Loading cluster information...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Initialize the mini map
+    const miniMap = L.map('mini-map').setView([20, 0], 2);
+    
+    // Add the base map layer
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(miniMap);
+    
+    // Create a layer group for balloon markers
+    const balloonMarkersGroup = L.layerGroup().addTo(miniMap);
+    
+    // Function to update the dashboard with latest data
+    async function updateDashboard() {
+        try {
+            // Fetch balloon data from our API
+            const response = await fetch('/api/balloons');
+            const data = await response.json();
+            
+            if (!data) {
+                console.error('No data received from API');
+                return;
+            }
+            
+            // Update last updated time
+            const lastUpdatedElem = document.getElementById('last-updated');
+            lastUpdatedElem.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+            
+            // Update summary statistics
+            document.getElementById('total-balloons').textContent = data.stats.total_balloons || 0;
+            document.getElementById('active-balloons').textContent = data.stats.active_balloons || 0;
+            
+            // Update altitude and speed stats if available
+            if (data.stats.altitude_stats && data.stats.altitude_stats.avg) {
+                document.getElementById('avg-altitude').textContent = 
+                    Math.round(data.stats.altitude_stats.avg).toLocaleString() || '-';
+            }
+            
+            if (data.stats.speed_stats && data.stats.speed_stats.avg) {
+                document.getElementById('avg-speed').textContent = 
+                    Math.round(data.stats.speed_stats.avg).toLocaleString() || '-';
+            }
+            
+            // Update mini map
+            updateMiniMap(data);
+            
+            // Update wind patterns information
+            updateWindPatterns(data.wind_patterns);
+            
+            // Update altitude chart
+            updateAltitudeChart(data);
+            
+            // Update clusters information
+            updateClustersInfo(data.clusters);
+            
+        } catch (error) {
+            console.error('Error updating dashboard:', error);
+        }
+    }
+    
+    // Function to update the mini map with balloon positions
+    function updateMiniMap(data) {
+        // Clear existing markers
+        balloonMarkersGroup.clearLayers();
+        
+        // Create a marker for each balloon
+        if (data.balloons && data.balloons.length > 0) {
+            data.balloons.forEach(balloon => {
+                if (balloon.latest && balloon.latest.lat && balloon.latest.lon) {
+                    // Create marker
+                    const marker = L.circleMarker([balloon.latest.lat, balloon.latest.lon], {
+                        radius: 5,
+                        fillColor: '#1a73e8',
+                        color: '#fff',
+                        weight: 1,
+                        opacity: 1,
+                        fillOpacity: 0.8
+                    });
+                    
+                    // Add popup with balloon info
+                    marker.bindPopup(`
+                        <strong>Balloon ID:</strong> ${balloon.id}<br>
+                        <strong>Position:</strong> ${balloon.latest.lat.toFixed(4)}, ${balloon.latest.lon.toFixed(4)}<br>
+                        <strong>Altitude:</strong> ${balloon.latest.alt ? balloon.latest.alt.toLocaleString() + ' m' : 'Unknown'}<br>
+                        ${balloon.avg_speed ? `<strong>Avg Speed:</strong> ${balloon.avg_speed.toFixed(1)} km/h<br>` : ''}
+                        ${balloon.direction ? `<strong>Direction:</strong> ${balloon.direction}<br>` : ''}
+                    `);
+                    
+                    // Add to the layer group
+                    balloonMarkersGroup.addLayer(marker);
+                }
+            });
+        }
+    }
+    
+    // Function to update wind patterns information
+    function updateWindPatterns(windPatterns) {
+        const windPatternsElem = document.getElementById('wind-patterns');
+        
+        if (!windPatterns || Object.keys(windPatterns).length === 0) {
+            windPatternsElem.innerHTML = '<p class="text-muted">No wind pattern data available</p>';
+            return;
+        }
+        
+        let html = '<ul class="list-group list-group-flush">';
+        
+        for (const [altitude, data] of Object.entries(windPatterns)) {
+            if (data.sample_size > 0) {
+                const altitudeLabel = altitude === 'low' ? 'Low Altitude (0-5km)' : 
+                                     altitude === 'medium' ? 'Medium Altitude (5-15km)' : 
+                                     'High Altitude (15km+)';
+                
+                html += `
+                    <li class="list-group-item">
+                        <div class="fw-bold">${altitudeLabel}</div>
+                        <div class="d-flex justify-content-between">
+                            <span>Direction: ${data.avg_direction_cardinal}</span>
+                            <span>Speed: ${data.avg_speed.toFixed(1)} km/h</span>
+                        </div>
+                        <div class="progress mt-1" style="height: 5px;">
+                            <div class="progress-bar" role="progressbar" style="width: ${Math.min(100, data.avg_speed * 3)}%"></div>
+                        </div>
+                        <small class="text-muted">Based on ${data.sample_size} data points</small>
+                    </li>
+                `;
+            }
+        }
+        
+        html += '</ul>';
+        windPatternsElem.innerHTML = html;
+    }
+    
+    // Function to update altitude chart
+    function updateAltitudeChart(data) {
+        const ctx = document.getElementById('altitude-chart').getContext('2d');
+        
+        // Group balloons by altitude ranges
+        const altitudeRanges = {
+            '0-5km': 0,
+            '5-10km': 0,
+            '10-15km': 0,
+            '15-20km': 0,
+            '20km+': 0
+        };
+        
+        // Count balloons in each altitude range
+        if (data.balloons && data.balloons.length > 0) {
+            data.balloons.forEach(balloon => {
+                if (balloon.latest && balloon.latest.alt !== undefined) {
+                    const altitude = balloon.latest.alt;
+                    
+                    if (altitude < 5000) {
+                        altitudeRanges['0-5km']++;
+                    } else if (altitude < 10000) {
+                        altitudeRanges['5-10km']++;
+                    } else if (altitude < 15000) {
+                        altitudeRanges['10-15km']++;
+                    } else if (altitude < 20000) {
+                        altitudeRanges['15-20km']++;
+                    } else {
+                        altitudeRanges['20km+']++;
+                    }
+                }
+            });
+        }
+        
+        // Check if chart already exists and destroy it
+        if (window.altitudeChart) {
+            window.altitudeChart.destroy();
+        }
+        
+        // Create new chart
+        window.altitudeChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: Object.keys(altitudeRanges),
+                datasets: [{
+                    label: 'Number of Balloons',
+                    data: Object.values(altitudeRanges),
+                    backgroundColor: [
+                        'rgba(54, 162, 235, 0.7)',
+                        'rgba(75, 192, 192, 0.7)',
+                        'rgba(153, 102, 255, 0.7)',
+                        'rgba(255, 159, 64, 0.7)',
+                        'rgba(255, 99, 132, 0.7)'
+                    ],
+                    borderColor: [
+                        'rgba(54, 162, 235, 1)',
+                        'rgba(75, 192, 192, 1)',
+                        'rgba(153, 102, 255, 1)',
+                        'rgba(255, 159, 64, 1)',
+                        'rgba(255, 99, 132, 1)'
+                    ],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Number of Balloons'
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Altitude Range'
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    // Function to update clusters information
+    function updateClustersInfo(clusters) {
+        const clustersInfoElem = document.getElementById('clusters-info');
+        
+        if (!clusters || clusters.length === 0) {
+            clustersInfoElem.innerHTML = '<p class="text-muted">No balloon clusters detected</p>';
+            return;
+        }
+        
+        let html = `<p>Detected ${clusters.length} balloon cluster${clusters.length > 1 ? 's' : ''}:</p>`;
+        html += '<div class="list-group">';
+        
+        clusters.sort((a, b) => b.size - a.size).forEach((cluster, index) => {
+            html += `
+                <div class="list-group-item">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h6 class="mb-1">Cluster ${index + 1}</h6>
+                        <span class="badge bg-primary rounded-pill">${cluster.size} balloons</span>
+                    </div>
+                    <p class="mb-1">Center: ${cluster.center.lat.toFixed(2)}, ${cluster.center.lon.toFixed(2)}</p>
+                    <small class="text-muted">Balloon IDs: ${cluster.balloons.join(', ')}</small>
+                </div>
+            `;
+        });
+        
+        html += '</div>';
+        clustersInfoElem.innerHTML = html;
+    }
+    
+    // Add event listener for refresh button
+    document.getElementById('refresh-btn').addEventListener('click', async () => {
+        try {
+            // Show loading state
+            document.getElementById('refresh-btn').disabled = true;
+            document.getElementById('last-updated').textContent = 'Refreshing data...';
+            
+            // Request data refresh
+            await fetch('/api/refresh');
+            
+            // Wait a moment for refresh to complete
+            setTimeout(() => {
+                updateDashboard();
+                document.getElementById('refresh-btn').disabled = false;
+            }, 2000);
+        } catch (error) {
+            console.error('Error refreshing data:', error);
+            document.getElementById('refresh-btn').disabled = false;
+            document.getElementById('last-updated').textContent = 'Error refreshing data';
+        }
+    });
+    
+    // Load initial data
+    document.addEventListener('DOMContentLoaded', () => {
+        updateDashboard();
+        
+        // Set up periodic refresh every 5 minutes
+        setInterval(updateDashboard, 5 * 60 * 1000);
+    });
+</script>
+{% endblock %}

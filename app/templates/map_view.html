@@ -1,0 +1,638 @@
+{% extends "base.html" %}
+
+{% block title %}Map View - Windborne Constellation Tracker{% endblock %}
+
+{% block extra_css %}
+<style>
+    #map-container {
+        height: calc(100vh - 180px);
+        min-height: 500px;
+    }
+    
+    .controls-panel {
+        background-color: rgba(255, 255, 255, 0.9);
+        border-radius: 5px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        padding: 15px;
+    }
+    
+    .balloon-list {
+        max-height: 300px;
+        overflow-y: auto;
+    }
+    
+    .balloon-list-item {
+        cursor: pointer;
+        transition: background-color 0.2s ease;
+    }
+    
+    .balloon-list-item:hover {
+        background-color: #f8f9fa;
+    }
+    
+    .balloon-list-item.active {
+        background-color: #e9ecef;
+    }
+    
+    .balloon-badge {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 5px;
+    }
+    
+    .badge-active {
+        background-color: #28a745;
+    }
+    
+    .badge-inactive {
+        background-color: #dc3545;
+    }
+    
+    .layer-control {
+        margin-bottom: 15px;
+    }
+    
+    #last-updated {
+        font-size: 0.8rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center">
+            <h1>Interactive Map View</h1>
+            <div>
+                <button id="refresh-map-btn" class="btn btn-outline-primary">
+                    <i class="bi bi-arrow-clockwise"></i> Refresh
+                </button>
+                <small id="last-updated" class="text-muted ms-2">Last updated: Loading...</small>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Initialize the map
+    const map = L.map('map-container').setView([20, 0], 2);
+    
+    // Add the base map layer
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+    
+    // Layer groups for different map elements
+    const balloonMarkersGroup = L.layerGroup().addTo(map);
+    const trajectoriesGroup = L.layerGroup().addTo(map);
+    const clustersGroup = L.layerGroup().addTo(map);
+    const windPatternsGroup = L.layerGroup();
+    
+    // Map data storage
+    let balloonData = null;
+    let selectedBalloonId = null;
+    
+    // Function to update the map with latest data
+    async function updateMap() {
+        try {
+            // Fetch balloon data from our API
+            const response = await fetch('/api/balloons');
+            balloonData = await response.json();
+            
+            if (!balloonData) {
+                console.error('No data received from API');
+                return;
+            }
+            
+            // Update last updated time
+            document.getElementById('last-updated').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+            
+            // Clear existing markers and paths
+            balloonMarkersGroup.clearLayers();
+            trajectoriesGroup.clearLayers();
+            clustersGroup.clearLayers();
+            windPatternsGroup.clearLayers();
+            
+            // Update balloon markers
+            updateBalloonMarkers();
+            
+            // Update trajectories if enabled
+            if (document.getElementById('show-trajectories').checked) {
+                updateTrajectories();
+            }
+            
+            // Update clusters if enabled
+            if (document.getElementById('show-clusters').checked) {
+                updateClusters();
+            }
+            
+            // Update wind patterns if enabled
+            if (document.getElementById('show-wind-patterns').checked) {
+                updateWindPatterns();
+            }
+            
+            // Update balloon list
+            updateBalloonList();
+            
+        } catch (error) {
+            console.error('Error updating map:', error);
+        }
+    }
+    
+    // Function to update balloon markers
+    function updateBalloonMarkers() {
+        if (!balloonData || !balloonData.balloons) return;
+        
+        const altitudeFilter = document.getElementById('altitude-filter').value;
+        
+        balloonData.balloons.forEach(balloon => {
+            if (!balloon.latest || !balloon.latest.lat || !balloon.latest.lon) return;
+            
+            // Apply altitude filter
+            if (altitudeFilter !== 'all' && balloon.latest.alt) {
+                const altitude = balloon.latest.alt;
+                if (altitudeFilter === 'low' && altitude >= 5000) return;
+                if (altitudeFilter === 'medium' && (altitude < 5000 || altitude >= 15000)) return;
+                if (altitudeFilter === 'high' && altitude < 15000) return;
+            }
+            
+            // Determine marker color based on activity status
+            const isActive = balloon.latest.timestamp && 
+                             (Date.now() / 1000 - balloon.latest.timestamp) < 7200; // 2 hours
+            const fillColor = isActive ? '#28a745' : '#dc3545';
+            
+            // Create marker
+            const marker = L.circleMarker([balloon.latest.lat, balloon.latest.lon], {
+                radius: 6,
+                fillColor: fillColor,
+                color: '#fff',
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.8
+            });
+            
+            // Highlight selected balloon
+            if (balloon.id === selectedBalloonId) {
+                marker.setStyle({
+                    radius: 8,
+                    weight: 2,
+                    color: '#ffff00'
+                });
+            }
+            
+            // Add popup with balloon info
+            marker.bindPopup(`
+                <div class="balloon-popup">
+                    <h6>Balloon ${balloon.id}</h6>
+                    <table class="table table-sm">
+                        <tr>
+                            <td>Position:</td>
+                            <td>${balloon.latest.lat.toFixed(4)}, ${balloon.latest.lon.toFixed(4)}</td>
+                        </tr>
+                        <tr>
+                            <td>Altitude:</td>
+                            <td>${balloon.latest.alt ? balloon.latest.alt.toLocaleString() + ' m' : 'Unknown'}</td>
+                        </tr>
+                        <tr>
+                            <td>Status:</td>
+                            <td><span class="badge ${isActive ? 'bg-success' : 'bg-danger'}">${isActive ? 'Active' : 'Inactive'}</span></td>
+                        </tr>
+                        ${balloon.avg_speed ? `
+                        <tr>
+                            <td>Avg Speed:</td>
+                            <td>${balloon.avg_speed.toFixed(1)} km/h</td>
+                        </tr>` : ''}
+                        ${balloon.direction ? `
+                        <tr>
+                            <td>Direction:</td>
+                            <td>${balloon.direction}</td>
+                        </tr>` : ''}
+                        ${balloon.total_distance ? `
+                        <tr>
+                            <td>Distance:</td>
+                            <td>${balloon.total_distance.toFixed(1)} km</td>
+                        </tr>` : ''}
+                    </table>
+                    <button class="btn btn-sm btn-primary track-balloon-btn" data-balloon-id="${balloon.id}">
+                        Track this balloon
+                    </button>
+                </div>
+            `);
+            
+            // Add click event
+            marker.on('click', () => {
+                selectedBalloonId = balloon.id;
+                updateMap();
+            });
+            
+            // Add to the layer group
+            balloonMarkersGroup.addLayer(marker);
+        });
+    }
+    
+    // Function to update trajectories
+    function updateTrajectories() {
+        if (!balloonData || !balloonData.trajectories) return;
+        
+        for (const [balloonId, trajectory] of Object.entries(balloonData.trajectories)) {
+            // Skip if no trajectory points or fewer than 2 points
+            if (!trajectory || trajectory.length < 2) continue;
+            
+            // Filter out invalid points
+            const validPoints = trajectory.filter(p => p.lat !== undefined && p.lon !== undefined);
+            if (validPoints.length < 2) continue;
+            
+            // Create path
+            const pathColor = balloonId === selectedBalloonId ? '#ffff00' : '#3388ff';
+            const pathWeight = balloonId === selectedBalloonId ? 4 : 2;
+            const pathOpacity = balloonId === selectedBalloonId ? 0.8 : 0.5;
+            
+            const path = L.polyline(
+                validPoints.map(p => [p.lat, p.lon]),
+                {
+                    color: pathColor,
+                    weight: pathWeight,
+                    opacity: pathOpacity
+                }
+            );
+            
+            // Add to the layer group
+            trajectoriesGroup.addLayer(path);
+            
+            // Add arrow markers to indicate direction
+            if (validPoints.length >= 3) {
+                for (let i = 1; i < validPoints.length - 1; i += Math.ceil(validPoints.length / 5)) {
+                    const p1 = validPoints[i];
+                    const p2 = validPoints[i+1];
+                    
+                    // Skip if missing points
+                    if (!p1 || !p2) continue;
+                    
+                    // Create arrow marker
+                    const arrowIcon = L.divIcon({
+                        html: '<i class="fas fa-arrow-right" style="color: ' + pathColor + ';"></i>',
+                        className: 'arrow-icon',
+                        iconSize: [20, 20]
+                    });
+                    
+                    // Calculate bearing
+                    const lat1 = p1.lat * Math.PI / 180;
+                    const lat2 = p2.lat * Math.PI / 180;
+                    const lon1 = p1.lon * Math.PI / 180;
+                    const lon2 = p2.lon * Math.PI / 180;
+                    
+                    const y = Math.sin(lon2 - lon1) * Math.cos(lat2);
+                    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
+                    const bearing = Math.atan2(y, x) * 180 / Math.PI;
+                    
+                    // Add arrow marker
+                    const marker = L.marker([p1.lat, p1.lon], {
+                        icon: arrowIcon,
+                        rotationAngle: bearing
+                    });
+                    
+                    // Add to the layer group
+                    trajectoriesGroup.addLayer(marker);
+                }
+            }
+        }
+    }
+    
+    // Function to update clusters
+    function updateClusters() {
+        if (!balloonData || !balloonData.clusters) return;
+        
+        balloonData.clusters.forEach(cluster => {
+            if (!cluster.center || !cluster.center.lat || !cluster.center.lon) return;
+            
+            // Create cluster marker
+            const marker = L.circle([cluster.center.lat, cluster.center.lon], {
+                radius: cluster.size * 10000,  // Size based on number of balloons
+                fillColor: '#ff7800',
+                fillOpacity: 0.2,
+                color: '#ff7800',
+                weight: 1
+            });
+            
+            // Add popup with cluster info
+            marker.bindPopup(`
+                <div class="cluster-popup">
+                    <h6>Balloon Cluster</h6>
+                    <p><strong>Balloons:</strong> ${cluster.size}</p>
+                    <p><strong>Center:</strong> ${cluster.center.lat.toFixed(4)}, ${cluster.center.lon.toFixed(4)}</p>
+                    <p><strong>Balloon IDs:</strong> ${cluster.balloons.join(', ')}</p>
+                </div>
+            `);
+            
+            // Add to the layer group
+            clustersGroup.addLayer(marker);
+        });
+    }
+    
+    // Function to update wind patterns
+    function updateWindPatterns() {
+        if (!balloonData || !balloonData.wind_patterns) return;
+        
+        for (const [altitude, data] of Object.entries(balloonData.wind_patterns)) {
+            if (!data || !data.avg_direction || !data.avg_speed || data.sample_size < 2) continue;
+            
+            // Create wind pattern markers at different locations based on altitude
+            let centerLat, centerLon;
+            
+            if (altitude === 'low') {
+                centerLat = 0;
+                centerLon = -120;
+            } else if (altitude === 'medium') {
+                centerLat = 0;
+                centerLon = 0;
+            } else {
+                centerLat = 0;
+                centerLon = 120;
+            }
+            
+            // Convert direction from degrees to radians
+            const dirRad = data.avg_direction * Math.PI / 180;
+            
+            // Calculate end point based on direction and speed
+            const arrowLength = Math.min(data.avg_speed * 0.5, 20);
+            const endLat = centerLat + arrowLength * Math.cos(dirRad);
+            const endLon = centerLon + arrowLength * Math.sin(dirRad) / Math.cos(centerLat * Math.PI / 180);
+            
+            // Create arrow
+            const arrow = L.polyline(
+                [[centerLat, centerLon], [endLat, endLon]],
+                {
+                    color: '#9c27b0',
+                    weight: 3
+                }
+            );
+            
+            // Create arrowhead
+            const arrowheadRad1 = dirRad + Math.PI * 0.85;
+            const arrowheadRad2 = dirRad + Math.PI * 1.15;
+            const arrowheadLength = arrowLength * 0.3;
+            
+            const arrowhead1Lat = endLat - arrowheadLength * Math.cos(arrowheadRad1);
+            const arrowhead1Lon = endLon - arrowheadLength * Math.sin(arrowheadRad1) / Math.cos(endLat * Math.PI / 180);
+            
+            const arrowhead2Lat = endLat - arrowheadLength * Math.cos(arrowheadRad2);
+            const arrowhead2Lon = endLon - arrowheadLength * Math.sin(arrowheadRad2) / Math.cos(endLat * Math.PI / 180);
+            
+            const arrowhead1 = L.polyline(
+                [[endLat, endLon], [arrowhead1Lat, arrowhead1Lon]],
+                {
+                    color: '#9c27b0',
+                    weight: 3
+                }
+            );
+            
+            const arrowhead2 = L.polyline(
+                [[endLat, endLon], [arrowhead2Lat, arrowhead2Lon]],
+                {
+                    color: '#9c27b0',
+                    weight: 3
+                }
+            );
+            
+            // Create label
+            const label = L.marker([centerLat + 2, centerLon], {
+                icon: L.divIcon({
+                    html: `<div style="background: rgba(255,255,255,0.7); padding: 3px 5px; border-radius: 3px;">
+                        <strong>${altitude.charAt(0).toUpperCase() + altitude.slice(1)} Altitude</strong><br>
+                        ${data.avg_direction_cardinal} @ ${data.avg_speed.toFixed(1)} km/h
+                    </div>`,
+                    className: 'wind-label'
+                })
+            });
+            
+            // Add to the layer group
+            windPatternsGroup.addLayer(arrow);
+            windPatternsGroup.addLayer(arrowhead1);
+            windPatternsGroup.addLayer(arrowhead2);
+            windPatternsGroup.addLayer(label);
+        }
+        
+        // Add or remove the wind patterns layer based on toggle
+        if (document.getElementById('show-wind-patterns').checked) {
+            map.addLayer(windPatternsGroup);
+        } else {
+            map.removeLayer(windPatternsGroup);
+        }
+    }
+    
+    // Function to update balloon list
+    function updateBalloonList() {
+        const balloonListElem = document.getElementById('balloon-list');
+        const searchTerm = document.getElementById('balloon-search').value.toLowerCase();
+        
+        if (!balloonData || !balloonData.balloons || balloonData.balloons.length === 0) {
+            balloonListElem.innerHTML = '<p class="text-muted text-center">No balloons found</p>';
+            return;
+        }
+        
+        // Sort balloons by ID
+        const sortedBalloons = [...balloonData.balloons].sort((a, b) => {
+            return a.id.localeCompare(b.id, undefined, { numeric: true });
+        });
+        
+        // Filter by search term if provided
+        const filteredBalloons = searchTerm ? 
+            sortedBalloons.filter(b => b.id.toLowerCase().includes(searchTerm)) : 
+            sortedBalloons;
+        
+        if (filteredBalloons.length === 0) {
+            balloonListElem.innerHTML = '<p class="text-muted text-center">No matching balloons found</p>';
+            return;
+        }
+        
+        // Build list HTML
+        let html = '<ul class="list-group">';
+        
+        filteredBalloons.forEach(balloon => {
+            const isActive = balloon.latest && balloon.latest.timestamp && 
+                             (Date.now() / 1000 - balloon.latest.timestamp) < 7200;
+            
+            const isSelected = balloon.id === selectedBalloonId;
+            
+            html += `
+                <li class="list-group-item balloon-list-item ${isSelected ? 'active' : ''}" data-balloon-id="${balloon.id}">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <span class="balloon-badge ${isActive ? 'badge-active' : 'badge-inactive'}"></span>
+                            Balloon ${balloon.id}
+                        </div>
+                        <small class="text-muted">
+                            ${balloon.latest && balloon.latest.alt ? 
+                                balloon.latest.alt.toLocaleString() + ' m' : 'Alt: N/A'}
+                        </small>
+                    </div>
+                </li>
+            `;
+        });
+        
+        html += '</ul>';
+        balloonListElem.innerHTML = html;
+        
+        // Add click event to balloon list items
+        document.querySelectorAll('.balloon-list-item').forEach(item => {
+            item.addEventListener('click', () => {
+                selectedBalloonId = item.dataset.balloonId;
+                
+                // Update UI
+                document.querySelectorAll('.balloon-list-item').forEach(i => {
+                    i.classList.remove('active');
+                });
+                item.classList.add('active');
+                
+                // Find balloon data
+                const balloon = balloonData.balloons.find(b => b.id === selectedBalloonId);
+                
+                // Center map on balloon if it exists
+                if (balloon && balloon.latest && balloon.latest.lat && balloon.latest.lon) {
+                    map.setView([balloon.latest.lat, balloon.latest.lon], 5);
+                }
+                
+                // Update map to highlight selected balloon
+                updateMap();
+            });
+        });
+    }
+    
+    // Event listeners for control toggles
+    document.getElementById('show-trajectories').addEventListener('change', function() {
+        if (this.checked) {
+            map.addLayer(trajectoriesGroup);
+            updateTrajectories();
+        } else {
+            map.removeLayer(trajectoriesGroup);
+        }
+    });
+    
+    document.getElementById('show-clusters').addEventListener('change', function() {
+        if (this.checked) {
+            map.addLayer(clustersGroup);
+            updateClusters();
+        } else {
+            map.removeLayer(clustersGroup);
+        }
+    });
+    
+    document.getElementById('show-wind-patterns').addEventListener('change', function() {
+        if (this.checked) {
+            map.addLayer(windPatternsGroup);
+            updateWindPatterns();
+        } else {
+            map.removeLayer(windPatternsGroup);
+        }
+    });
+    
+    document.getElementById('altitude-filter').addEventListener('change', function() {
+        updateMap();
+    });
+    
+    // Search functionality
+    document.getElementById('search-btn').addEventListener('click', function() {
+        updateBalloonList();
+    });
+    
+    document.getElementById('balloon-search').addEventListener('keyup', function(event) {
+        if (event.key === 'Enter') {
+            updateBalloonList();
+        }
+    });
+    
+    // Refresh button
+    document.getElementById('refresh-map-btn').addEventListener('click', async function() {
+        this.disabled = true;
+        document.getElementById('last-updated').textContent = 'Refreshing data...';
+        
+        // Request data refresh
+        await fetch('/api/refresh');
+        
+        // Wait a moment for refresh to complete
+        setTimeout(() => {
+            updateMap();
+            this.disabled = false;
+        }, 2000);
+    });
+    
+    // Initialize map on page load
+    document.addEventListener('DOMContentLoaded', () => {
+        updateMap();
+        
+        // Set up periodic refresh every 5 minutes
+        setInterval(updateMap, 5 * 60 * 1000);
+    });
+    
+    // Handle popup button clicks
+    map.on('popupopen', function(e) {
+        const trackButtons = document.querySelectorAll('.track-balloon-btn');
+        trackButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                selectedBalloonId = this.dataset.balloonId;
+                updateMap();
+                map.closePopup();
+            });
+        });
+    });
+</script>
+{% endblock %}
+
+<div class="row">
+    <div class="col-md-9">
+        <div class="card">
+            <div class="card-body p-0">
+                <div id="map-container"></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="controls-panel mb-3">
+            <h5>Display Options</h5>
+            <div class="layer-control">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="show-trajectories" checked>
+                    <label class="form-check-label" for="show-trajectories">Show Trajectories</label>
+                </div>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="show-clusters" checked>
+                    <label class="form-check-label" for="show-clusters">Show Clusters</label>
+                </div>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="show-wind-patterns">
+                    <label class="form-check-label" for="show-wind-patterns">Show Wind Patterns</label>
+                </div>
+            </div>
+            
+            <div class="mb-3">
+                <label for="altitude-filter" class="form-label">Altitude Filter</label>
+                <select class="form-select" id="altitude-filter">
+                    <option value="all" selected>All Altitudes</option>
+                    <option value="low">Low (0-5km)</option>
+                    <option value="medium">Medium (5-15km)</option>
+                    <option value="high">High (15km+)</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="controls-panel">
+            <h5>Balloon List</h5>
+            <div class="input-group mb-3">
+                <input type="text" class="form-control" id="balloon-search" placeholder="Search by ID">
+                <button class="btn btn-outline-secondary" type="button" id="search-btn">
+                    <i class="bi bi-search"></i>
+                </button>
+            </div>
+            
+            <div class="balloon-list" id="balloon-list">
+                <div class="text-center py-3">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Loading balloons...</p>
+                </div>
+            </div>
