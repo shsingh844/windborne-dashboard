@@ -24,6 +24,48 @@
     #refresh-btn {
         cursor: pointer;
     }
+    .data-quality-indicator {
+        display: flex;
+        flex-wrap: wrap;
+        margin-top: 10px;
+    }
+    .data-hour {
+        width: 20px;
+        height: 20px;
+        margin: 2px;
+        border-radius: 50%;
+        display: inline-block;
+    }
+    .data-hour.available {
+        background-color: #28a745;
+    }
+    .data-hour.missing {
+        background-color: #dc3545;
+    }
+    .data-hour.invalid {
+        background-color: #ffc107;
+    }
+    .data-quality-legend {
+        display: flex;
+        justify-content: center;
+        margin-top: 5px;
+        font-size: 0.8rem;
+    }
+    .legend-item {
+        display: flex;
+        align-items: center;
+        margin: 0 10px;
+    }
+    .legend-color {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 5px;
+    }
+    .error-alert {
+        margin-top: 15px;
+    }
 </style>
 {% endblock %}
 
@@ -40,6 +82,36 @@
             </div>
         </div>
         <p class="lead">Real-time tracking and analysis of Windborne's global sounding balloon constellation.</p>
+        
+        <!-- Data quality indicator -->
+        <div class="card mt-3">
+            <div class="card-body">
+                <h5 class="card-title">API Data Availability (Last 24 Hours)</h5>
+                <div class="data-quality-indicator" id="data-quality-indicator">
+                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <span class="ms-2">Loading data quality information...</span>
+                </div>
+                <div class="data-quality-legend">
+                    <div class="legend-item">
+                        <div class="legend-color available"></div>
+                        <span>Available</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color missing"></div>
+                        <span>Missing (404)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color invalid"></div>
+                        <span>Invalid Format</span>
+                    </div>
+                </div>
+                <div id="error-alerts">
+                    <!-- Error alerts will be shown here -->
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -174,6 +246,9 @@
             const lastUpdatedElem = document.getElementById('last-updated');
             lastUpdatedElem.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
             
+            // Update data quality indicator
+            updateDataQualityIndicator(data);
+            
             // Update summary statistics
             document.getElementById('total-balloons').textContent = data.stats.total_balloons || 0;
             document.getElementById('active-balloons').textContent = data.stats.active_balloons || 0;
@@ -204,6 +279,64 @@
         } catch (error) {
             console.error('Error updating dashboard:', error);
         }
+    }
+    
+    // Function to update data quality indicator
+    function updateDataQualityIndicator(data) {
+        const indicatorElem = document.getElementById('data-quality-indicator');
+        const errorAlertsElem = document.getElementById('error-alerts');
+        
+        // Check if we have data quality information
+        if (!data.data_quality) {
+            indicatorElem.innerHTML = '<p class="text-muted">No data quality information available</p>';
+            return;
+        }
+        
+        const dataQuality = data.data_quality;
+        const missingHours = dataQuality.missing_hours || 0;
+        const invalidFormatHours = dataQuality.invalid_format_hours || 0;
+        const totalErrors = missingHours + invalidFormatHours;
+        const availableHours = 24 - totalErrors;
+        
+        // Build the data quality indicator
+        let html = '';
+        
+        // Create an array to represent all 24 hours
+        const hourStatus = Array(24).fill('available');
+        
+        // Mark error hours appropriately
+        if (data.errors && Array.isArray(data.errors)) {
+            data.errors.forEach(error => {
+                if (error.hour >= 0 && error.hour < 24) {
+                    if (error.status === 'missing') {
+                        hourStatus[error.hour] = 'missing';
+                    } else if (error.status === 'invalid_format') {
+                        hourStatus[error.hour] = 'invalid';
+                    }
+                }
+            });
+        }
+        
+        // Build the indicator HTML
+        hourStatus.forEach((status, index) => {
+            html += `<div class="data-hour ${status}" title="Hour ${index}: ${status}"></div>`;
+        });
+        
+        indicatorElem.innerHTML = html;
+        
+        // Show error alerts if there are any errors
+        let alertsHtml = '';
+        
+        if (totalErrors > 0) {
+            alertsHtml += `
+                <div class="alert alert-warning error-alert">
+                    <strong>Data Quality Issues:</strong> ${totalErrors} out of 24 hours of data 
+                    have issues (${missingHours} missing, ${invalidFormatHours} with invalid format).
+                </div>
+            `;
+        }
+        
+        errorAlertsElem.innerHTML = alertsHtml;
     }
     
     // Function to update the mini map with balloon positions
@@ -238,6 +371,17 @@
                     balloonMarkersGroup.addLayer(marker);
                 }
             });
+        } else {
+            // If no balloons, add a "No Data" marker at the center
+            const noDataMarker = L.marker([0, 0], {
+                icon: L.divIcon({
+                    className: 'no-data-marker',
+                    html: '<div style="background-color:rgba(255,0,0,0.5);padding:10px;border-radius:50%;color:white;">No Data</div>',
+                    iconSize: [80, 40],
+                    iconAnchor: [40, 20]
+                })
+            });
+            balloonMarkersGroup.addLayer(noDataMarker);
         }
     }
     

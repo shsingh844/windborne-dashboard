@@ -44,10 +44,10 @@ async def get_balloons():
                 raise HTTPException(status_code=500, detail="Failed to fetch data from Windborne API")
             
             # Extract balloon history
-            balloon_history = data_fetcher.get_balloon_history(all_hours_data)
+            balloon_data = data_fetcher.get_balloon_history(all_hours_data)
             
             # Process the data
-            processed_data = data_processor.process_balloon_history(balloon_history)
+            processed_data = data_processor.process_balloon_history(balloon_data)
             
             # Update cache
             cache["balloon_data"] = processed_data
@@ -85,6 +85,29 @@ async def refresh_data(background_tasks: BackgroundTasks):
     
     return {"message": "Data refresh scheduled"}
 
+@router.get("/api/status")
+async def get_status():
+    """Get the current status of the data."""
+    if cache["balloon_data"] is None:
+        return {
+            "status": "No data available",
+            "last_updated": None,
+            "data_quality": {
+                "missing_hours": 0,
+                "invalid_format_hours": 0,
+                "total_errors": 0,
+                "total_hours": 24,
+                "available_hours": 0
+            }
+        }
+    
+    data_quality = cache["balloon_data"].get("data_quality", {})
+    return {
+        "status": "Data available",
+        "last_updated": cache["last_updated"],
+        "data_quality": data_quality
+    }
+
 async def refresh_data_task():
     """Background task to refresh all data."""
     if cache["is_updating"]:
@@ -104,10 +127,10 @@ async def refresh_data_task():
             return
         
         # Extract balloon history
-        balloon_history = data_fetcher.get_balloon_history(all_hours_data)
+        balloon_data = data_fetcher.get_balloon_history(all_hours_data)
         
         # Process the data
-        processed_data = data_processor.process_balloon_history(balloon_history)
+        processed_data = data_processor.process_balloon_history(balloon_data)
         
         # Update cache
         cache["balloon_data"] = processed_data

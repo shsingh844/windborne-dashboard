@@ -1,8 +1,8 @@
 import json
 import logging
 import math
-from typing import Dict, List, Any, Tuple, Optional
 import numpy as np
+from typing import Dict, List, Any, Tuple, Optional
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
@@ -13,32 +13,61 @@ class DataProcessor:
     def __init__(self):
         self.earth_radius = 6371.0  # Earth radius in kilometers
     
-    def process_balloon_history(self, balloon_history: Dict[str, List[Dict]]) -> Dict[str, Any]:
+    def process_balloon_history(self, balloon_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process the balloon history to extract useful metrics and insights.
         
         Args:
-            balloon_history: Dictionary mapping balloon ID to its history
+            balloon_data: Dictionary with balloon history and errors
             
         Returns:
             Dictionary with processed data and insights
         """
+        # Extract data from the input
+        balloon_history = balloon_data.get('balloon_history', {})
+        error_records = balloon_data.get('errors', [])
+        
+        # Debug log
+        logger.info(f"Processing balloon history with {len(balloon_history)} balloons and {len(error_records) if error_records else 0} errors")
+        
         if not balloon_history:
             logger.warning("No balloon history data to process")
+            
+            # Return minimal structure with error data
             return {
                 "balloons": [],
                 "stats": {
                     "total_balloons": 0,
                     "active_balloons": 0
+                },
+                "errors": error_records,
+                "data_quality": {
+                    "missing_hours": len([e for e in error_records if e.get('status') == 'missing']) if error_records else 0,
+                    "invalid_format_hours": len([e for e in error_records if e.get('status') == 'invalid_format']) if error_records else 0,
+                    "total_errors": len(error_records) if error_records else 0
                 }
             }
-            
+        
+        # Debug - print some sample data if available
+        if balloon_history:
+            sample_balloon_id = next(iter(balloon_history))
+            sample_data = balloon_history[sample_balloon_id]
+            logger.info(f"Sample balloon data for ID {sample_balloon_id}: {sample_data[0] if sample_data else 'No data points'}")
+        
         result = {
             "balloons": [],
             "trajectories": {},
             "stats": {},
             "weather_correlations": {},
-            "clusters": {}
+            "clusters": {},
+            "errors": error_records,
+            "data_quality": {
+                "missing_hours": len([e for e in error_records if e.get('status') == 'missing']) if error_records else 0,
+                "invalid_format_hours": len([e for e in error_records if e.get('status') == 'invalid_format']) if error_records else 0,
+                "total_errors": len(error_records) if error_records else 0,
+                "total_hours": 24,
+                "available_hours": 24 - (len(error_records) if error_records else 0)
+            }
         }
         
         # Process each balloon
@@ -48,6 +77,7 @@ class DataProcessor:
         
         for balloon_id, history in balloon_history.items():
             if not history:
+                logger.warning(f"Balloon {balloon_id} has empty history")
                 continue
                 
             # Get the most recent data point for this balloon
@@ -84,6 +114,9 @@ class DataProcessor:
             if metrics.get("avg_speed") is not None:
                 all_speeds.append(metrics["avg_speed"])
         
+        # Debug
+        logger.info(f"Processed {len(result['balloons'])} balloons, {len(active_balloons)} active")
+        
         # Calculate overall statistics
         result["stats"] = {
             "total_balloons": len(result["balloons"]),
@@ -92,13 +125,19 @@ class DataProcessor:
             "speed_stats": self._calculate_statistics(all_speeds) if all_speeds else {}
         }
         
+        # Debug - log stats
+        logger.info(f"Statistics: {result['stats']}")
+        
         # Identify clusters of balloons
         result["clusters"] = self._identify_balloon_clusters([b["latest"] for b in result["balloons"] if "latest" in b])
         
         # Find wind patterns based on balloon movement
         result["wind_patterns"] = self._analyze_wind_patterns(balloon_history)
         
-        return result
+        # Sanitize data to ensure all values are JSON-serializable
+        sanitized_result = self.sanitize_json_data(result)
+        
+        return sanitized_result
     
     def _calculate_balloon_metrics(self, history: List[Dict]) -> Dict[str, Any]:
         """
@@ -267,6 +306,7 @@ class DataProcessor:
     def _calculate_statistics(self, values: List[float]) -> Dict[str, float]:
         """
         Calculate basic statistics for a list of values.
+        Replace NaN, infinity, and other non-JSON-serializable values.
         
         Args:
             values: List of numerical values
@@ -276,13 +316,58 @@ class DataProcessor:
         """
         if not values:
             return {}
-            
-        return {
-            "min": min(values),
-            "max": max(values),
-            "avg": sum(values) / len(values),
-            "median": sorted(values)[len(values) // 2]
+        
+        # Filter out NaN and infinity values
+        filtered_values = [v for v in values if not (math.isnan(v) or math.isinf(v))]
+        
+        if not filtered_values:
+            return {
+                "min": 0.0,
+                "max": 0.0,
+                "avg": 0.0,
+                "median": 0.0
+            }
+        
+        # Calculate statistics, replacing any NaN or infinity values with 0
+        stats = {
+            "min": min(filtered_values),
+            "max": max(filtered_values),
+            "avg": sum(filtered_values) / len(filtered_values),
+            "median": sorted(filtered_values)[len(filtered_values) // 2]
         }
+        
+        # Ensure all values are JSON-serializable
+        for key, value in stats.items():
+            if isinstance(value, (float, np.float32, np.float64)):
+                if math.isnan(value) or math.isinf(value):
+                    stats[key] = 0.0
+            
+        return stats
+    
+    def sanitize_json_data(self, data):
+        """
+        Recursively sanitize a data structure to ensure all values are JSON-serializable.
+        Replaces NaN, infinity, and other problematic values.
+        
+        Args:
+            data: Any data structure (dict, list, etc.)
+            
+        Returns:
+            Sanitized data structure
+        """
+        if isinstance(data, dict):
+            return {k: self.sanitize_json_data(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [self.sanitize_json_data(item) for item in data]
+        elif isinstance(data, (float, np.float32, np.float64)):
+            # Replace NaN and infinity with 0.0
+            if math.isnan(data) or math.isinf(data):
+                return 0.0
+            return float(data)  # Convert numpy types to standard float
+        elif isinstance(data, (np.int32, np.int64)):
+            return int(data)  # Convert numpy types to standard int
+        else:
+            return data
     
     def _identify_balloon_clusters(self, balloon_positions: List[Dict]) -> List[Dict[str, Any]]:
         """
