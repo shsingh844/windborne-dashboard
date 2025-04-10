@@ -3,8 +3,9 @@ import asyncio
 import json
 import logging
 import re
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 import time
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -50,39 +51,130 @@ class DataFetcher:
                     # Debug: Log the raw content (first 100 chars)
                     logger.info(f"Raw content for hour {hour} (first 100 chars): {text_content[:100]}")
                     
-                    # Parse the content
-                    cleaned_data = self._clean_and_parse_json(text_content, hour)
+                    # Parse the raw content, extracting data even if invalid
+                    coordinate_arrays = self._extract_all_coordinates(text_content)
                     
-                    # If we could not parse the data, return a special marker
-                    if cleaned_data is None:
-                        return {
-                            "error": "parse_error",
-                            "hour": hour,
-                            "status": "invalid_format",
-                            "url": url
-                        }
-                    
-                    # Convert array format to our expected object format with balloons
-                    if isinstance(cleaned_data, list):
-                        # The data appears to be a list of position arrays
-                        # Convert to the expected format with balloons
-                        converted_data = self._convert_array_to_balloons(cleaned_data, hour)
-                        logger.info(f"Converted list data for hour {hour} into {len(converted_data.get('balloons', []))} balloons")
+                    if coordinate_arrays and len(coordinate_arrays) > 0:
+                        logger.info(f"Extracted {len(coordinate_arrays)} coordinate arrays for hour {hour}")
+                        # Convert to balloon format
+                        converted_data = self._convert_array_to_balloons(coordinate_arrays, hour)
                         return converted_data
                     
-                    # Check if balloons field exists
-                    if not isinstance(cleaned_data, dict) or 'balloons' not in cleaned_data:
-                        logger.warning(f"Parsed data for hour {hour} has unexpected format")
-                        # Convert to expected format
-                        return {"balloons": [], "hour": hour, "status": "unexpected_format"}
-                    
-                    # Success with proper format
-                    logger.info(f"Successfully parsed data for hour {hour} with {len(cleaned_data.get('balloons', []))} balloons")
-                    return cleaned_data
+                    # If extraction failed, attempt regular parsing
+                    try:
+                        # Try standard JSON parsing with cleaning
+                        cleaned_data = self._clean_and_parse_json(text_content, hour)
+                        
+                        # Convert array format to our expected object format with balloons
+                        if isinstance(cleaned_data, list):
+                            # The data appears to be a list of position arrays
+                            converted_data = self._convert_array_to_balloons(cleaned_data, hour)
+                            logger.info(f"Converted list data for hour {hour} into {len(converted_data.get('balloons', []))} balloons")
+                            return converted_data
+                        
+                        # Check if balloons field exists
+                        if not isinstance(cleaned_data, dict) or 'balloons' not in cleaned_data:
+                            logger.warning(f"Parsed data for hour {hour} has unexpected format")
+                            # Convert to expected format with empty balloons
+                            return {"balloons": [], "hour": hour}
+                        
+                        # Success with proper format
+                        logger.info(f"Successfully parsed data for hour {hour} with {len(cleaned_data.get('balloons', []))} balloons")
+                        return cleaned_data
+                        
+                    except Exception as parse_error:
+                        logger.error(f"Error parsing data for hour {hour}: {str(parse_error)}")
+                        # Create placeholder with empty balloons
+                        return {"balloons": [], "hour": hour}
                     
         except Exception as e:
             logger.exception(f"Unexpected error fetching data from {url}: {str(e)}")
-            return None
+            # Return empty data instead of error marker
+            return {"balloons": [], "hour": hour}
+    
+    def _extract_all_coordinates(self, content: str) -> List[List[float]]:
+        """
+        Extract all possible coordinate arrays from content, handling NaN values.
+        
+        Args:
+            content: String to extract coordinates from
+            
+        Returns:
+            List of coordinate arrays
+        """
+        coordinates = []
+        
+        # Use regex to find patterns that look like coordinate arrays
+        # This pattern handles NaN and negative numbers
+        pattern = r'\[\s*([-\d\.]+|NaN)\s*,\s*([-\d\.]+|NaN)\s*,\s*([-\d\.]+|NaN)\s*\]'
+        
+        matches = re.findall(pattern, content)
+        for match in matches:
+            try:
+                # Convert values, replacing NaN with 0
+                lat = float(match[0]) if match[0] != "NaN" else 0.0
+                lon = float(match[1]) if match[1] != "NaN" else 0.0
+                alt = float(match[2]) if match[2] != "NaN" else 0.0
+                
+                # Skip coordinates that are all zeros or NaN
+                if (lat == 0 and lon == 0 and alt == 0) or any(math.isnan(x) for x in [lat, lon, alt]):
+                    continue
+                    
+                coordinates.append([lat, lon, alt])
+            except (ValueError, IndexError):
+                pass
+        
+        return coordinates
+    
+    def _clean_and_parse_json(self, content: str, hour: int) -> Any:
+        """
+        Clean potentially corrupted JSON and parse it.
+        
+        Args:
+            content: Raw JSON string
+            hour: The hour for logging purposes
+            
+        Returns:
+            Parsed JSON data
+        """
+        try:
+            # First try direct parsing
+            return json.loads(content)
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON decode error for hour {hour}, attempting to clean: {str(e)}")
+            
+            # Try to fix common issues
+            
+            # Missing opening bracket
+            if not content.lstrip().startswith('[') and ('[' in content or content.lstrip().startswith('    [')):
+                fixed_content = '[\n' + content
+                try:
+                    return json.loads(fixed_content)
+                except json.JSONDecodeError:
+                    pass
+            
+            # Remove problematic characters
+            content = content.strip()
+            content = content.replace(',]', ']')
+            content = content.replace(',}', '}')
+            content = content.replace('NaN', '0.0')
+            content = content.replace('null', '0.0')
+            content = content.replace('undefined', '0.0')
+            
+            # Remove non-ASCII characters
+            content = ''.join(char for char in content if ord(char) < 128)
+            
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError:
+                # If all cleaning fails, extract coordinates using regex
+                coordinates = self._extract_all_coordinates(content)
+                if coordinates:
+                    return coordinates
+                
+                # If all else fails, return an empty array
+                logger.error(f"Failed to parse JSON for hour {hour} after all attempts")
+                return []
     
     def _convert_array_to_balloons(self, array_data: List, hour: int) -> Dict[str, Any]:
         """
@@ -111,9 +203,17 @@ class DataFetcher:
                 lon = float(coords[1]) if coords[1] is not None else 0
                 alt = float(coords[2]) if coords[2] is not None else 0
                 
+                # Skip if all values are zero (likely placeholder)
+                if lat == 0 and lon == 0 and alt == 0:
+                    continue
+                
+                # Skip if any value is NaN
+                if any(math.isnan(x) for x in [lat, lon, alt]):
+                    continue
+                
                 # Create a balloon object
                 balloon = {
-                    "id": f"balloon_{hour}_{i}",  # Generate a unique ID
+                    "id": f"balloon_{hour:02d}_{i:04d}",  # Generate a unique ID with leading zeros
                     "lat": lat,
                     "lon": lon,
                     "alt": alt
@@ -123,74 +223,13 @@ class DataFetcher:
             except (ValueError, TypeError, IndexError) as e:
                 logger.warning(f"Error converting coordinates for hour {hour}, index {i}: {str(e)}")
         
+        logger.info(f"Created {len(balloons)} balloon objects for hour {hour}")
+        
         return {
             "balloons": balloons,
             "hour": hour,
             "source": "array_conversion"
         }
-    
-    def _clean_and_parse_json(self, content: str, hour: int) -> Optional[Any]:
-        """
-        Clean potentially corrupted JSON and parse it.
-        
-        Args:
-            content: Raw JSON string
-            hour: The hour for logging purposes
-            
-        Returns:
-            Parsed JSON data or None if parsing failed
-        """
-        try:
-            # First try direct parsing
-            return json.loads(content)
-        except json.JSONDecodeError as e:
-            logger.warning(f"JSON decode error for hour {hour}, attempting to clean: {str(e)}")
-            
-            try:
-                # First, let's handle the "Extra data" case which is common in the logs
-                if "Extra data" in str(e):
-                    # Extract the position of the error
-                    match = re.search(r'char (\d+)', str(e))
-                    if match:
-                        pos = int(match.group(1))
-                        # Try to parse just the content up to the error position
-                        try:
-                            return json.loads(content[:pos])
-                        except json.JSONDecodeError:
-                            pass
-                
-                # Apply simple fixes without complex regex
-                content = content.strip()
-                content = content.replace(',]', ']')
-                content = content.replace(',}', '}')
-                content = content.replace('NaN', '0.0')
-                content = content.replace('null', '"null"')
-                content = content.replace('undefined', '0.0')
-                
-                # Remove non-ASCII characters
-                content = ''.join(char for char in content if ord(char) < 128)
-                
-                # Try parsing again
-                try:
-                    return json.loads(content)
-                except json.JSONDecodeError:
-                    pass
-                
-                # Check if this is an array with a leading whitespace issue
-                if content.lstrip().startswith('['):
-                    trimmed_content = content.lstrip()
-                    try:
-                        return json.loads(trimmed_content)
-                    except json.JSONDecodeError:
-                        pass
-                
-                # If all else fails, return None
-                logger.error(f"Could not parse JSON for hour {hour} after multiple attempts")
-                return None
-                
-            except Exception as e:
-                logger.exception(f"Error during JSON cleaning for hour {hour}: {str(e)}")
-                return None
     
     async def fetch_all_hours(self) -> Dict[int, Dict]:
         """
@@ -250,7 +289,8 @@ class DataFetcher:
                 continue
                 
             valid_hours_count += 1
-            logger.info(f"Processing hour {hour} with {len(hour_data['balloons'])} balloons")
+            balloons_count = len(hour_data['balloons'])
+            logger.info(f"Processing hour {hour} with {balloons_count} balloons")
             
             # Processing balloons from this hour
             for balloon in hour_data['balloons']:
@@ -265,7 +305,7 @@ class DataFetcher:
                     lat = balloon['lat']
                     lon = balloon['lon']
                     alt = balloon.get('alt', 0)
-                    balloon_id = f"balloon_{lat:.5f}_{lon:.5f}_{alt:.5f}"
+                    balloon_id = f"balloon_{hour:02d}_{lat:.5f}_{lon:.5f}_{alt:.5f}"
                 else:
                     balloon_id = str(balloon['id'])
                 

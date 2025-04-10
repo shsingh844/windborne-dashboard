@@ -2,73 +2,6 @@
 
 {% block title %}Dashboard - Windborne Constellation Tracker{% endblock %}
 
-{% block extra_css %}
-<style>
-    .dashboard-card {
-        transition: transform 0.3s ease;
-    }
-    .dashboard-card:hover {
-        transform: translateY(-5px);
-    }
-    #last-updated {
-        font-size: 0.8rem;
-    }
-    .stat-value {
-        font-size: 2rem;
-        font-weight: bold;
-    }
-    .stat-label {
-        font-size: 0.9rem;
-        color: #6c757d;
-    }
-    #refresh-btn {
-        cursor: pointer;
-    }
-    .data-quality-indicator {
-        display: flex;
-        flex-wrap: wrap;
-        margin-top: 10px;
-    }
-    .data-hour {
-        width: 20px;
-        height: 20px;
-        margin: 2px;
-        border-radius: 50%;
-        display: inline-block;
-    }
-    .data-hour.available {
-        background-color: #28a745;
-    }
-    .data-hour.missing {
-        background-color: #dc3545;
-    }
-    .data-hour.invalid {
-        background-color: #ffc107;
-    }
-    .data-quality-legend {
-        display: flex;
-        justify-content: center;
-        margin-top: 5px;
-        font-size: 0.8rem;
-    }
-    .legend-item {
-        display: flex;
-        align-items: center;
-        margin: 0 10px;
-    }
-    .legend-color {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        display: inline-block;
-        margin-right: 5px;
-    }
-    .error-alert {
-        margin-top: 15px;
-    }
-</style>
-{% endblock %}
-
 {% block content %}
 <div class="row mb-4">
     <div class="col-12">
@@ -101,10 +34,6 @@
                     <div class="legend-item">
                         <div class="legend-color missing"></div>
                         <span>Missing (404)</span>
-                    </div>
-                    <div class="legend-item">
-                        <div class="legend-color invalid"></div>
-                        <span>Invalid Format</span>
                     </div>
                 </div>
                 <div id="error-alerts">
@@ -292,46 +221,43 @@
             return;
         }
         
-        const dataQuality = data.data_quality;
-        const missingHours = dataQuality.missing_hours || 0;
-        const invalidFormatHours = dataQuality.invalid_format_hours || 0;
-        const totalErrors = missingHours + invalidFormatHours;
-        const availableHours = 24 - totalErrors;
-        
         // Build the data quality indicator
-        let html = '';
+        let html = '<div class="quality-grid">';
         
         // Create an array to represent all 24 hours
         const hourStatus = Array(24).fill('available');
         
-        // Mark error hours appropriately
+        // Mark missing hours
         if (data.errors && Array.isArray(data.errors)) {
             data.errors.forEach(error => {
-                if (error.hour >= 0 && error.hour < 24) {
-                    if (error.status === 'missing') {
-                        hourStatus[error.hour] = 'missing';
-                    } else if (error.status === 'invalid_format') {
-                        hourStatus[error.hour] = 'invalid';
-                    }
+                if (error.hour >= 0 && error.hour < 24 && error.status === 'missing') {
+                    hourStatus[error.hour] = 'missing';
                 }
             });
         }
         
-        // Build the indicator HTML
-        hourStatus.forEach((status, index) => {
-            html += `<div class="data-hour ${status}" title="Hour ${index}: ${status}"></div>`;
-        });
+        // Build the indicator HTML with hour labels
+        for (let hour = 0; hour < 24; hour++) {
+            html += `
+                <div class="hour-container">
+                    <div class="data-hour ${hourStatus[hour]}" title="Hour ${hour}: ${hourStatus[hour]}"></div>
+                    <div class="hour-label">${hour.toString().padStart(2, '0')}</div>
+                </div>
+            `;
+        }
         
+        html += '</div>';
         indicatorElem.innerHTML = html;
         
-        // Show error alerts if there are any errors
+        // Show error alerts if there are any missing hours
         let alertsHtml = '';
         
-        if (totalErrors > 0) {
+        const missingHours = hourStatus.filter(status => status === 'missing').length;
+        
+        if (missingHours > 0) {
             alertsHtml += `
                 <div class="alert alert-warning error-alert">
-                    <strong>Data Quality Issues:</strong> ${totalErrors} out of 24 hours of data 
-                    have issues (${missingHours} missing, ${invalidFormatHours} with invalid format).
+                    <strong>Data Quality Issues:</strong> ${missingHours} out of 24 hours of data are missing (404).
                 </div>
             `;
         }

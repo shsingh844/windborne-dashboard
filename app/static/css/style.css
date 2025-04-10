@@ -21,6 +21,14 @@ body {
 }
 
 /* Dashboard styles */
+.dashboard-card {
+    transition: transform 0.3s ease;
+}
+
+.dashboard-card:hover {
+    transform: translateY(-5px);
+}
+
 .stat-value {
     font-size: 2rem;
     font-weight: bold;
@@ -30,6 +38,18 @@ body {
 .stat-label {
     font-size: 0.9rem;
     color: #6c757d;
+}
+
+#last-updated {
+    font-size: 0.8rem;
+}
+
+#refresh-btn {
+    cursor: pointer;
+}
+
+.error-alert {
+    margin-top: 15px;
 }
 
 /* Map styles */
@@ -157,5 +177,87 @@ body {
     
     #balloon-data-table {
         font-size: 0.8rem;
+    }
+}
+
+.data-quality-indicator {
+    margin-top: 10px;
+    margin-bottom: 20px;
+    overflow-x: auto; /* Add horizontal scrolling if needed */
+}
+
+.quality-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 15px;
+    padding: 10px 0;
+    min-width: min-content; /* Ensure all items are visible */
+}
+
+.hour-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 40px; /* Ensure minimum width */
+}
+
+.data-hour {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    margin-bottom: 5px;
+}
+
+.data-hour.available {
+    background-color: #28a745;
+}
+
+.data-hour.missing {
+    background-color: #dc3545;
+}
+
+.hour-label {
+    font-size: 0.8rem;
+    color: #6c757d;
+}
+
+.data-quality-legend {
+    display: flex;
+    justify-content: center;
+    margin-top: 10px;
+    margin-bottom: 15px;
+    font-size: 0.8rem;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    margin: 0 15px;
+}
+
+.legend-color {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    margin-bottom: 5px;
+}
+
+.legend-color.available {
+    background-color: #28a745;
+}
+
+.legend-color.missing {
+    background-color: #dc3545;
+}
+
+/* For small screens, allow horizontal scrolling */
+@media (max-width: 768px) {
+    .data-quality-indicator {
+        overflow-x: auto;
+    }
+    
+    .quality-grid {
+        padding-bottom: 10px; /* Add padding for scrollbar */
     }
 }

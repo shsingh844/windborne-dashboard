@@ -30,6 +30,15 @@ class DataProcessor:
         # Debug log
         logger.info(f"Processing balloon history with {len(balloon_history)} balloons and {len(error_records) if error_records else 0} errors")
         
+        # Count missing hours (404 errors)
+        missing_hours = 0
+        
+        if error_records:
+            for error in error_records:
+                status = error.get('status', '')
+                if status == 'missing':
+                    missing_hours += 1
+        
         if not balloon_history:
             logger.warning("No balloon history data to process")
             
@@ -42,9 +51,9 @@ class DataProcessor:
                 },
                 "errors": error_records,
                 "data_quality": {
-                    "missing_hours": len([e for e in error_records if e.get('status') == 'missing']) if error_records else 0,
-                    "invalid_format_hours": len([e for e in error_records if e.get('status') == 'invalid_format']) if error_records else 0,
-                    "total_errors": len(error_records) if error_records else 0
+                    "missing_hours": missing_hours,
+                    "total_hours": 24,
+                    "available_hours": 24 - missing_hours
                 }
             }
         
@@ -62,11 +71,9 @@ class DataProcessor:
             "clusters": {},
             "errors": error_records,
             "data_quality": {
-                "missing_hours": len([e for e in error_records if e.get('status') == 'missing']) if error_records else 0,
-                "invalid_format_hours": len([e for e in error_records if e.get('status') == 'invalid_format']) if error_records else 0,
-                "total_errors": len(error_records) if error_records else 0,
+                "missing_hours": missing_hours,
                 "total_hours": 24,
-                "available_hours": 24 - (len(error_records) if error_records else 0)
+                "available_hours": 24 - missing_hours
             }
         }
         
@@ -99,7 +106,7 @@ class DataProcessor:
             # Add trajectory data
             result["trajectories"][balloon_id] = [
                 {"lat": point.get("lat"), "lon": point.get("lon"), "alt": point.get("alt", 0), 
-                 "timestamp": point.get("timestamp")}
+                "timestamp": point.get("timestamp")}
                 for point in history if "lat" in point and "lon" in point
             ]
             
