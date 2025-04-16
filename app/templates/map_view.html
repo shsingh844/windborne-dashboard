@@ -99,23 +99,101 @@
     // Function to update the map with latest data
     async function updateMap() {
         try {
+            // Show loading indicator
+            document.getElementById('last-updated').textContent = 'Loading...';
+            
             // Fetch balloon data from our API
             const response = await fetch('/api/balloons');
             balloonData = await response.json();
             
             if (!balloonData) {
                 console.error('No data received from API');
+                document.getElementById('last-updated').textContent = 'Error: No data available';
+                
+                // Show a message on the map
+                if (!document.getElementById('no-data-message')) {
+                    const noDataMessage = document.createElement('div');
+                    noDataMessage.id = 'no-data-message';
+                    noDataMessage.style.position = 'absolute';
+                    noDataMessage.style.top = '50%';
+                    noDataMessage.style.left = '50%';
+                    noDataMessage.style.transform = 'translate(-50%, -50%)';
+                    noDataMessage.style.padding = '15px';
+                    noDataMessage.style.backgroundColor = 'rgba(255,255,255,0.8)';
+                    noDataMessage.style.borderRadius = '5px';
+                    noDataMessage.style.zIndex = '1000';
+                    noDataMessage.innerHTML = '<h4>No balloon data available</h4><p>Please try refreshing later.</p>';
+                    document.getElementById('map-container').appendChild(noDataMessage);
+                }
                 return;
+            }
+            
+            // Remove no-data message if it exists
+            const noDataMessage = document.getElementById('no-data-message');
+            if (noDataMessage) {
+                noDataMessage.remove();
             }
             
             // Update last updated time
             document.getElementById('last-updated').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
             
-            // Clear existing markers and paths
-            balloonMarkersGroup.clearLayers();
-            trajectoriesGroup.clearLayers();
-            clustersGroup.clearLayers();
-            windPatternsGroup.clearLayers();
+            // Initialize the map if it doesn't exist yet
+            if (!map) {
+                // Create the map centered on a default location
+                map = L.map('map-container').setView([20, 0], 2);
+                
+                // Add the base map layer
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                }).addTo(map);
+                
+                // Create layer groups
+                balloonMarkersGroup = L.layerGroup().addTo(map);
+                trajectoriesGroup = L.layerGroup().addTo(map);
+                clustersGroup = L.layerGroup().addTo(map);
+                windPatternsGroup = L.layerGroup();
+                
+                // Initialize state variables
+                selectedBalloonId = null;
+                
+                // Add UI listeners (these will be called only once)
+                initializeMapControls();
+            } else {
+                // Clear existing markers and paths
+                balloonMarkersGroup.clearLayers();
+                trajectoriesGroup.clearLayers();
+                clustersGroup.clearLayers();
+                windPatternsGroup.clearLayers();
+            }
+            
+            // Check if we have any balloons to display
+            if (!balloonData.balloons || balloonData.balloons.length === 0) {
+                // Display a message on the map if no balloons
+                if (!document.getElementById('no-balloons-message')) {
+                    const noBallonsMessage = document.createElement('div');
+                    noBallonsMessage.id = 'no-balloons-message';
+                    noBallonsMessage.style.position = 'absolute';
+                    noBallonsMessage.style.top = '50%';
+                    noBallonsMessage.style.left = '50%';
+                    noBallonsMessage.style.transform = 'translate(-50%, -50%)';
+                    noBallonsMessage.style.padding = '15px';
+                    noBallonsMessage.style.backgroundColor = 'rgba(255,255,255,0.8)';
+                    noBallonsMessage.style.borderRadius = '5px';
+                    noBallonsMessage.style.zIndex = '1000';
+                    noBallonsMessage.innerHTML = '<h4>No balloons detected</h4><p>Data is available but no balloons were found in the current data.</p>';
+                    document.getElementById('map-container').appendChild(noBallonsMessage);
+                }
+                
+                // Still update the balloon list to show empty state
+                updateBalloonList();
+                return;
+            }
+            
+            // Remove no-balloons message if it exists
+            const noBallonsMessage = document.getElementById('no-balloons-message');
+            if (noBallonsMessage) {
+                noBallonsMessage.remove();
+            }
             
             // Update balloon markers
             updateBalloonMarkers();
@@ -140,8 +218,96 @@
             
         } catch (error) {
             console.error('Error updating map:', error);
+            document.getElementById('last-updated').textContent = 'Error updating data';
         }
     }
+
+// Function to initialize map controls
+function initializeMapControls() {
+    // Event listeners for control toggles
+    document.getElementById('show-trajectories').addEventListener('change', function() {
+        if (this.checked) {
+            map.addLayer(trajectoriesGroup);
+            updateTrajectories();
+        } else {
+            map.removeLayer(trajectoriesGroup);
+        }
+    });
+    
+    document.getElementById('show-clusters').addEventListener('change', function() {
+        if (this.checked) {
+            map.addLayer(clustersGroup);
+            updateClusters();
+        } else {
+            map.removeLayer(clustersGroup);
+        }
+    });
+    
+    document.getElementById('show-wind-patterns').addEventListener('change', function() {
+        if (this.checked) {
+            map.addLayer(windPatternsGroup);
+            updateWindPatterns();
+        } else {
+            map.removeLayer(windPatternsGroup);
+        }
+    });
+    
+    document.getElementById('altitude-filter').addEventListener('change', function() {
+        updateMap();
+    });
+    
+    // Search functionality
+    document.getElementById('search-btn').addEventListener('click', function() {
+        updateBalloonList();
+    });
+    
+    document.getElementById('balloon-search').addEventListener('keyup', function(event) {
+        if (event.key === 'Enter') {
+            updateBalloonList();
+        }
+    });
+    
+    // Refresh button
+    document.getElementById('refresh-map-btn').addEventListener('click', async function() {
+        this.disabled = true;
+        document.getElementById('last-updated').textContent = 'Refreshing data...';
+        
+        // Request data refresh
+        await fetch('/api/refresh');
+        
+        // Wait a moment for refresh to complete
+        setTimeout(() => {
+            updateMap();
+            this.disabled = false;
+        }, 2000);
+    });
+    
+    // Handle popup button clicks
+    map.on('popupopen', function(e) {
+        const trackButtons = document.querySelectorAll('.track-balloon-btn');
+        trackButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                selectedBalloonId = this.dataset.balloonId;
+                updateMap();
+                map.closePopup();
+            });
+        });
+    });
+}
+
+// Make sure initialization happens only once when the DOM is loaded
+let mapInitialized = false;
+
+document.addEventListener('DOMContentLoaded', () => {
+    if (!mapInitialized) {
+        mapInitialized = true;
+        // Run initial update
+        updateMap();
+        
+        // Set up periodic refresh every 5 minutes
+        setInterval(updateMap, 5 * 60 * 1000);
+    }
+});
     
     // Function to update balloon markers
     function updateBalloonMarkers() {

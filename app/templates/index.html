@@ -434,7 +434,7 @@
         });
     }
     
-    // Function to update clusters information
+    // Function to update clusters information with pagination
     function updateClustersInfo(clusters) {
         const clustersInfoElem = document.getElementById('clusters-info');
         
@@ -443,24 +443,89 @@
             return;
         }
         
-        let html = `<p>Detected ${clusters.length} balloon cluster${clusters.length > 1 ? 's' : ''}:</p>`;
-        html += '<div class="list-group">';
+        // Sort clusters by size (largest first)
+        const sortedClusters = [...clusters].sort((a, b) => b.size - a.size);
         
-        clusters.sort((a, b) => b.size - a.size).forEach((cluster, index) => {
-            html += `
-                <div class="list-group-item">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <h6 class="mb-1">Cluster ${index + 1}</h6>
-                        <span class="badge bg-primary rounded-pill">${cluster.size} balloons</span>
+        // Pagination variables
+        const itemsPerPage = 5;
+        const totalClusters = sortedClusters.length;
+        const totalPages = Math.ceil(totalClusters / itemsPerPage);
+        let currentPage = 1;
+        
+        // Function to render clusters for current page
+        function renderClusters(page) {
+            const startIndex = (page - 1) * itemsPerPage;
+            const endIndex = Math.min(startIndex + itemsPerPage, totalClusters);
+            const currentClusters = sortedClusters.slice(startIndex, endIndex);
+            
+            let html = `<p>Detected ${totalClusters} balloon cluster${totalClusters > 1 ? 's' : ''}</p>`;
+            html += '<div class="list-group mb-3">';
+            
+            currentClusters.forEach((cluster, index) => {
+                const displayIndex = startIndex + index + 1;
+                html += `
+                    <div class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h6 class="mb-1">Cluster ${displayIndex}</h6>
+                            <span class="badge bg-primary rounded-pill">${cluster.size} balloons</span>
+                        </div>
+                        <p class="mb-1">Center: ${cluster.center.lat.toFixed(2)}, ${cluster.center.lon.toFixed(2)}</p>
+                        <small class="text-muted">Balloon IDs: ${cluster.balloons.slice(0, 3).join(', ')}${cluster.balloons.length > 3 ? ` and ${cluster.balloons.length - 3} more` : ''}</small>
                     </div>
-                    <p class="mb-1">Center: ${cluster.center.lat.toFixed(2)}, ${cluster.center.lon.toFixed(2)}</p>
-                    <small class="text-muted">Balloon IDs: ${cluster.balloons.join(', ')}</small>
-                </div>
-            `;
-        });
+                `;
+            });
+            
+            html += '</div>';
+            
+            // Add pagination controls if needed
+            if (totalPages > 1) {
+                html += '<nav aria-label="Cluster pagination"><ul class="pagination pagination-sm justify-content-center">';
+                
+                // Previous button
+                html += `
+                    <li class="page-item ${page === 1 ? 'disabled' : ''}">
+                        <a class="page-link" href="#" data-page="${page - 1}" aria-label="Previous">
+                            <span aria-hidden="true">&laquo;</span>
+                        </a>
+                    </li>
+                `;
+                
+                // Page numbers
+                for (let i = 1; i <= totalPages; i++) {
+                    html += `
+                        <li class="page-item ${i === page ? 'active' : ''}">
+                            <a class="page-link" href="#" data-page="${i}">${i}</a>
+                        </li>
+                    `;
+                }
+                
+                // Next button
+                html += `
+                    <li class="page-item ${page === totalPages ? 'disabled' : ''}">
+                        <a class="page-link" href="#" data-page="${page + 1}" aria-label="Next">
+                            <span aria-hidden="true">&raquo;</span>
+                        </a>
+                    </li>
+                `;
+                
+                html += '</ul></nav>';
+            }
+            
+            clustersInfoElem.innerHTML = html;
+            
+            // Add event listeners to pagination controls
+            document.querySelectorAll('#clusters-info .pagination .page-link').forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const page = parseInt(this.dataset.page);
+                    currentPage = page;
+                    renderClusters(page);
+                });
+            });
+        }
         
-        html += '</div>';
-        clustersInfoElem.innerHTML = html;
+        // Initial render
+        renderClusters(currentPage);
     }
     
     // Add event listener for refresh button
