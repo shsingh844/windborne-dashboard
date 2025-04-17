@@ -127,7 +127,9 @@
                 <h5 class="card-title mb-0">Altitude Distribution</h5>
             </div>
             <div class="card-body">
-                <canvas id="altitude-chart" height="250"></canvas>
+                <div id="altitude-chart-container">
+                    <canvas id="altitude-chart" height="400"></canvas>
+                </div>
             </div>
         </div>
     </div>
@@ -434,7 +436,7 @@
         });
     }
     
-    // Function to update clusters information with pagination
+    // Function to update clusters information with improved pagination and fixed layout
     function updateClustersInfo(clusters) {
         const clustersInfoElem = document.getElementById('clusters-info');
         
@@ -447,22 +449,65 @@
         const sortedClusters = [...clusters].sort((a, b) => b.size - a.size);
         
         // Pagination variables
-        const itemsPerPage = 5;
-        const totalClusters = sortedClusters.length;
-        const totalPages = Math.ceil(totalClusters / itemsPerPage);
+        let itemsPerPage = 10; // Default to 10 items
         let currentPage = 1;
         
-        // Function to render clusters for current page
-        function renderClusters(page) {
-            const startIndex = (page - 1) * itemsPerPage;
-            const endIndex = Math.min(startIndex + itemsPerPage, totalClusters);
-            const currentClusters = sortedClusters.slice(startIndex, endIndex);
+        // Store these values so they persist across renders
+        if (window.clusterPagination) {
+            itemsPerPage = window.clusterPagination.itemsPerPage;
+            currentPage = window.clusterPagination.currentPage;
+        } else {
+            window.clusterPagination = {
+                itemsPerPage: itemsPerPage,
+                currentPage: currentPage
+            };
+        }
+        
+        // Function to render clusters for current page with row count selection
+        function renderClusters(page, rowsPerPage) {
+            // Update stored values
+            window.clusterPagination.itemsPerPage = rowsPerPage;
+            window.clusterPagination.currentPage = page;
             
-            let html = `<p>Detected ${totalClusters} balloon cluster${totalClusters > 1 ? 's' : ''}</p>`;
-            html += '<div class="list-group mb-3">';
+            const totalClusters = sortedClusters.length;
+            const totalPages = rowsPerPage === 0 ? 1 : Math.ceil(totalClusters / rowsPerPage);
+            
+            // Adjust page if needed
+            if (page > totalPages) {
+                page = totalPages;
+                window.clusterPagination.currentPage = page;
+            }
+            
+            // Get items for the current page
+            let currentClusters;
+            if (rowsPerPage === 0) {
+                // Show all
+                currentClusters = sortedClusters;
+            } else {
+                const startIndex = (page - 1) * rowsPerPage;
+                const endIndex = Math.min(startIndex + rowsPerPage, totalClusters);
+                currentClusters = sortedClusters.slice(startIndex, endIndex);
+            }
+            
+            // Start building the HTML
+            let html = '<div class="mb-3 d-flex align-items-center">';
+            html += '<label for="cluster-rows-per-page" class="me-2">Show</label>';
+            html += '<select id="cluster-rows-per-page" class="form-select form-select-sm" style="width: auto;">';
+            html += `<option value="10" ${rowsPerPage === 10 ? 'selected' : ''}>10</option>`;
+            html += `<option value="25" ${rowsPerPage === 25 ? 'selected' : ''}>25</option>`;
+            html += `<option value="50" ${rowsPerPage === 50 ? 'selected' : ''}>50</option>`;
+            html += `<option value="100" ${rowsPerPage === 100 ? 'selected' : ''}>100</option>`;
+            html += `<option value="0" ${rowsPerPage === 0 ? 'selected' : ''}>All</option>`;
+            html += '</select>';
+            html += `<label class="ms-2">clusters - Total: ${totalClusters}</label>`;
+            html += '</div>';
+            
+            // Add scrollable container for clusters
+            html += '<div class="clusters-scrollable-container">';
+            html += '<div class="list-group">';
             
             currentClusters.forEach((cluster, index) => {
-                const displayIndex = startIndex + index + 1;
+                const displayIndex = (rowsPerPage === 0) ? index + 1 : (page - 1) * rowsPerPage + index + 1;
                 html += `
                     <div class="list-group-item">
                         <div class="d-flex justify-content-between align-items-center">
@@ -475,57 +520,77 @@
                 `;
             });
             
-            html += '</div>';
+            html += '</div>'; // End of list-group
+            html += '</div>'; // End of scrollable container
             
-            // Add pagination controls if needed
-            if (totalPages > 1) {
-                html += '<nav aria-label="Cluster pagination"><ul class="pagination pagination-sm justify-content-center">';
-                
-                // Previous button
+            // Add consistent pagination controls (only if not showing "All")
+            if (rowsPerPage > 0 && totalPages > 1) {
                 html += `
-                    <li class="page-item ${page === 1 ? 'disabled' : ''}">
-                        <a class="page-link" href="#" data-page="${page - 1}" aria-label="Previous">
-                            <span aria-hidden="true">&laquo;</span>
-                        </a>
-                    </li>
+                    <div id="cluster-pagination-container" class="d-flex justify-content-between align-items-center mt-3">
+                        <div id="cluster-page-info">Showing ${currentClusters.length} of ${totalClusters} clusters</div>
+                        <div class="d-flex align-items-center">
+                            <button id="cluster-prev-page" class="btn btn-sm btn-outline-secondary me-2" ${page === 1 ? 'disabled' : ''}>Previous</button>
+                            <div class="d-flex align-items-center">
+                                <span class="me-2">Page</span>
+                                <input id="cluster-current-page" type="number" class="form-control form-control-sm" style="width: 60px;" value="${page}" min="1" max="${totalPages}">
+                                <span class="mx-2">of</span>
+                                <span id="cluster-total-pages">${totalPages}</span>
+                            </div>
+                            <button id="cluster-next-page" class="btn btn-sm btn-outline-secondary ms-2" ${page === totalPages ? 'disabled' : ''}>Next</button>
+                        </div>
+                    </div>
                 `;
-                
-                // Page numbers
-                for (let i = 1; i <= totalPages; i++) {
-                    html += `
-                        <li class="page-item ${i === page ? 'active' : ''}">
-                            <a class="page-link" href="#" data-page="${i}">${i}</a>
-                        </li>
-                    `;
-                }
-                
-                // Next button
-                html += `
-                    <li class="page-item ${page === totalPages ? 'disabled' : ''}">
-                        <a class="page-link" href="#" data-page="${page + 1}" aria-label="Next">
-                            <span aria-hidden="true">&raquo;</span>
-                        </a>
-                    </li>
-                `;
-                
-                html += '</ul></nav>';
             }
             
             clustersInfoElem.innerHTML = html;
             
-            // Add event listeners to pagination controls
-            document.querySelectorAll('#clusters-info .pagination .page-link').forEach(link => {
-                link.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    const page = parseInt(this.dataset.page);
-                    currentPage = page;
-                    renderClusters(page);
-                });
+            // Add event listener for rows per page
+            document.getElementById('cluster-rows-per-page').addEventListener('change', function() {
+                const newRowsPerPage = parseInt(this.value);
+                // Reset to page 1 when changing rows per page
+                renderClusters(1, newRowsPerPage);
             });
+            
+            // Add event listeners to pagination controls (if they exist)
+            if (rowsPerPage > 0 && totalPages > 1) {
+                document.getElementById('cluster-prev-page').addEventListener('click', function() {
+                    if (page > 1) {
+                        renderClusters(page - 1, rowsPerPage);
+                    }
+                });
+                
+                document.getElementById('cluster-next-page').addEventListener('click', function() {
+                    if (page < totalPages) {
+                        renderClusters(page + 1, rowsPerPage);
+                    }
+                });
+                
+                document.getElementById('cluster-current-page').addEventListener('change', function() {
+                    let newPage = parseInt(this.value) || 1;
+                    
+                    // Validate page number
+                    if (newPage < 1) newPage = 1;
+                    if (newPage > totalPages) newPage = totalPages;
+                    
+                    renderClusters(newPage, rowsPerPage);
+                });
+                
+                document.getElementById('cluster-current-page').addEventListener('keydown', function(event) {
+                    if (event.key === 'Enter') {
+                        let newPage = parseInt(this.value) || 1;
+                        
+                        // Validate page number
+                        if (newPage < 1) newPage = 1;
+                        if (newPage > totalPages) newPage = totalPages;
+                        
+                        renderClusters(newPage, rowsPerPage);
+                    }
+                });
+            }
         }
         
         // Initial render
-        renderClusters(currentPage);
+        renderClusters(window.clusterPagination.currentPage, window.clusterPagination.itemsPerPage);
     }
     
     // Add event listener for refresh button

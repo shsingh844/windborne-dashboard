@@ -251,6 +251,44 @@ body {
     background-color: #dc3545;
 }
 
+.chart-container {
+    height: 400px !important; /* Fixed height for charts */
+    min-height: 400px !important;
+    position: relative;
+    overflow: visible;
+}
+
+#altitude-chart-container {
+    height: 400px !important; /* Fixed height specifically for altitude chart */
+    position: relative;
+    overflow: visible;
+}
+
+.clusters-scrollable-container {
+    max-height: 500px; /* Set a maximum height */
+    overflow-y: auto; /* Enable vertical scrolling */
+    margin-bottom: 15px;
+}
+
+/* Optional: Add some style to the scrollbar */
+.clusters-scrollable-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+.clusters-scrollable-container::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+.clusters-scrollable-container::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 4px;
+}
+
+.clusters-scrollable-container::-webkit-scrollbar-thumb:hover {
+    background: #a1a1a1;
+}
+
 /* For small screens, allow horizontal scrolling */
 @media (max-width: 768px) {
     .data-quality-indicator {

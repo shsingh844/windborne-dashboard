@@ -147,11 +147,28 @@
             <div class="card-header">
                 <div class="d-flex justify-content-between align-items-center">
                     <h5 class="card-title mb-0">Balloon Data</h5>
-                    <div class="input-group" style="max-width: 300px;">
-                        <input type="text" class="form-control" id="table-search" placeholder="Search...">
-                        <button class="btn btn-outline-secondary" type="button" id="table-search-btn">
-                            <i class="bi bi-search"></i>
-                        </button>
+                    <div class="d-flex align-items-center">
+                        <div class="me-3">
+                            <label for="rows-per-page" class="me-2">Show</label>
+                            <select id="rows-per-page" class="form-select form-select-sm" style="width: auto;">
+                                <option value="10" selected>10</option>
+                                <option value="25">25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                                <option value="0">All</option>
+                            </select>
+                        </div>
+                        <div class="btn-group me-3" role="group" aria-label="Status filter">
+                            <button type="button" class="btn btn-sm btn-outline-secondary status-filter-btn" data-status="all">All</button>
+                            <button type="button" class="btn btn-sm btn-outline-success status-filter-btn" data-status="active">Active</button>
+                            <button type="button" class="btn btn-sm btn-outline-danger status-filter-btn" data-status="inactive">Inactive</button>
+                        </div>
+                        <div class="input-group" style="max-width: 300px;">
+                            <input type="text" class="form-control" id="table-search" placeholder="Search...">
+                            <button class="btn btn-outline-secondary" type="button" id="table-search-btn">
+                                <i class="bi bi-search"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -176,6 +193,19 @@
                             </tr>
                         </tbody>
                     </table>
+                    <div id="pagination-container" class="d-flex justify-content-between align-items-center mt-3">
+                        <div id="page-info">Showing 0 of 0 entries</div>
+                        <div class="d-flex align-items-center">
+                            <button id="prev-page" class="btn btn-sm btn-outline-secondary me-2">Previous</button>
+                            <div class="d-flex align-items-center">
+                                <span class="me-2">Page</span>
+                                <input id="current-page" type="number" class="form-control form-control-sm" style="width: 60px;" value="1" min="1">
+                                <span class="mx-2">of</span>
+                                <span id="total-pages">1</span>
+                            </div>
+                            <button id="next-page" class="btn btn-sm btn-outline-secondary ms-2">Next</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -517,51 +547,92 @@
         }
     }
     
-    // Function to update balloon data table
+    // Function to update balloon data table with pagination and status filtering
     function updateBalloonTable() {
         if (!balloonData || !balloonData.balloons || balloonData.balloons.length === 0) {
             document.getElementById('balloon-table-body').innerHTML = 
                 '<tr><td colspan="8" class="text-center">No balloon data available</td></tr>';
+            document.getElementById('pagination-container').style.display = 'none';
             return;
         }
         
         // Get search term
         const searchTerm = document.getElementById('table-search').value.toLowerCase();
         
+        // Get current status filter
+        const activeStatusFilter = document.querySelector('.status-filter-btn.active').dataset.status;
+        
         // Sort balloons by ID
         const sortedBalloons = [...balloonData.balloons].sort((a, b) => {
             return a.id.localeCompare(b.id, undefined, { numeric: true });
         });
         
-        // Filter by search term if provided
-        const filteredBalloons = searchTerm ? 
-            sortedBalloons.filter(balloon => {
-                // Search in ID, position, or direction
-                return balloon.id.toLowerCase().includes(searchTerm) || 
-                       (balloon.latest && balloon.latest.lat && balloon.latest.lon && 
+        // Apply both search and status filters
+        const filteredBalloons = sortedBalloons.filter(balloon => {
+            // First check status filter
+            if (activeStatusFilter !== 'all') {
+                const isActive = balloon.latest && balloon.latest.timestamp && 
+                                (Date.now() / 1000 - balloon.latest.timestamp) < 7200; // 2 hours
+                
+                if (activeStatusFilter === 'active' && !isActive) return false;
+                if (activeStatusFilter === 'inactive' && isActive) return false;
+            }
+            
+            // Then check search term if provided
+            if (searchTerm) {
+                return balloon.id.toLowerCase().includes(searchTerm) ||
+                    (balloon.latest && balloon.latest.lat && balloon.latest.lon &&
                         `${balloon.latest.lat},${balloon.latest.lon}`.includes(searchTerm)) ||
-                       (balloon.direction && balloon.direction.toLowerCase().includes(searchTerm));
-            }) : 
-            sortedBalloons;
+                    (balloon.direction && balloon.direction.toLowerCase().includes(searchTerm));
+            }
+            
+            return true;
+        });
+        
+        // Pagination logic
+        const rowsPerPageSelect = document.getElementById('rows-per-page');
+        const rowsPerPage = parseInt(rowsPerPageSelect.value);
+        const currentPageInput = document.getElementById('current-page');
+        const currentPage = parseInt(currentPageInput.value) || 1;
+        
+        // Calculate pagination values
+        const totalItems = filteredBalloons.length;
+        const totalPages = rowsPerPage === 0 ? 1 : Math.ceil(totalItems / rowsPerPage);
+        
+        // Adjust current page if needed
+        const adjustedCurrentPage = Math.min(currentPage, totalPages);
+        currentPageInput.value = adjustedCurrentPage;
+        
+        // Get paginated data
+        let paginatedBalloons;
+        if (rowsPerPage === 0) {
+            // Show all records
+            paginatedBalloons = filteredBalloons;
+        } else {
+            // Calculate start and end indices
+            const startIndex = (adjustedCurrentPage - 1) * rowsPerPage;
+            const endIndex = Math.min(startIndex + rowsPerPage, totalItems);
+            paginatedBalloons = filteredBalloons.slice(startIndex, endIndex);
+        }
         
         // Build table rows
         let tableHtml = '';
         
-        filteredBalloons.forEach(balloon => {
-            const isActive = balloon.latest && balloon.latest.timestamp && 
-                             (Date.now() / 1000 - balloon.latest.timestamp) < 7200; // 2 hours
+        paginatedBalloons.forEach(balloon => {
+            const isActive = balloon.latest && balloon.latest.timestamp &&
+                            (Date.now() / 1000 - balloon.latest.timestamp) < 7200; // 2 hours
             
-            const lastUpdate = balloon.latest && balloon.latest.timestamp ? 
+            const lastUpdate = balloon.latest && balloon.latest.timestamp ?
                 new Date(balloon.latest.timestamp * 1000).toLocaleString() : 'Unknown';
             
             tableHtml += `
                 <tr>
                     <td>${balloon.id}</td>
                     <td><span class="badge ${isActive ? 'bg-success' : 'bg-danger'}">${isActive ? 'Active' : 'Inactive'}</span></td>
-                    <td>${balloon.latest && balloon.latest.lat && balloon.latest.lon ? 
-                         `${balloon.latest.lat.toFixed(4)}, ${balloon.latest.lon.toFixed(4)}` : 'Unknown'}</td>
-                    <td>${balloon.latest && balloon.latest.alt !== undefined ? 
-                         balloon.latest.alt.toLocaleString() : 'Unknown'}</td>
+                    <td>${balloon.latest && balloon.latest.lat && balloon.latest.lon ?
+                        `${balloon.latest.lat.toFixed(4)}, ${balloon.latest.lon.toFixed(4)}` : 'Unknown'}</td>
+                    <td>${balloon.latest && balloon.latest.alt !== undefined ?
+                        balloon.latest.alt.toLocaleString() : 'Unknown'}</td>
                     <td>${balloon.avg_speed ? balloon.avg_speed.toFixed(1) : 'Unknown'}</td>
                     <td>${balloon.direction || 'Unknown'}</td>
                     <td>${balloon.total_distance ? balloon.total_distance.toFixed(1) : 'Unknown'}</td>
@@ -572,10 +643,63 @@
         
         if (tableHtml === '') {
             tableHtml = '<tr><td colspan="8" class="text-center">No matching balloons found</td></tr>';
+            document.getElementById('pagination-container').style.display = 'none';
+        } else {
+            document.getElementById('pagination-container').style.display = 'flex';
         }
         
         document.getElementById('balloon-table-body').innerHTML = tableHtml;
+        
+        // Update pagination info
+        document.getElementById('page-info').textContent = `Showing ${paginatedBalloons.length} of ${totalItems} entries`;
+        document.getElementById('total-pages').textContent = totalPages;
+        
+        // Update pagination buttons state
+        document.getElementById('prev-page').disabled = adjustedCurrentPage <= 1;
+        document.getElementById('next-page').disabled = adjustedCurrentPage >= totalPages;
     }
+
+// Function to handle page navigation
+function changePage(direction) {
+    const currentPageInput = document.getElementById('current-page');
+    const currentPage = parseInt(currentPageInput.value) || 1;
+    const totalPages = parseInt(document.getElementById('total-pages').textContent);
+    
+    let newPage = currentPage + direction;
+    
+    // Validate new page
+    if (newPage < 1) newPage = 1;
+    if (newPage > totalPages) newPage = totalPages;
+    
+    // Update current page and refresh table
+    currentPageInput.value = newPage;
+    updateBalloonTable();
+}
+
+// Function to go to a specific page
+function goToPage(event) {
+    if (event.key === 'Enter') {
+        const currentPageInput = document.getElementById('current-page');
+        const currentPage = parseInt(currentPageInput.value) || 1;
+        const totalPages = parseInt(document.getElementById('total-pages').textContent);
+        
+        // Validate page number
+        let newPage = currentPage;
+        if (newPage < 1) newPage = 1;
+        if (newPage > totalPages) newPage = totalPages;
+        
+        // Update current page and refresh table
+        currentPageInput.value = newPage;
+        updateBalloonTable();
+    }
+}
+
+// Function to change rows per page
+function changeRowsPerPage() {
+    // Reset to first page when changing rows per page
+    document.getElementById('current-page').value = 1;
+    updateBalloonTable();
+}
     
     // Event listeners for time filter buttons
     document.querySelectorAll('.time-filter-btn').forEach(btn => {
@@ -620,10 +744,44 @@
     
     // Initialize analytics on page load
     document.addEventListener('DOMContentLoaded', () => {
+
+        // Initialize pagination controls
+        document.getElementById('rows-per-page').addEventListener('change', changeRowsPerPage);
+        document.getElementById('current-page').addEventListener('keydown', goToPage);
+        document.getElementById('prev-page').addEventListener('click', () => changePage(-1));
+        document.getElementById('next-page').addEventListener('click', () => changePage(1));
+        
+        // Initialize status filter buttons
+        const statusFilterButtons = document.querySelectorAll('.status-filter-btn');
+        // Set 'All' as the default active button
+        statusFilterButtons[0].classList.add('active');
+        
+        statusFilterButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                // Update active state
+                statusFilterButtons.forEach(btn => btn.classList.remove('active'));
+                this.classList.add('active');
+                
+                // Reset to first page when changing filter
+                document.getElementById('current-page').value = 1;
+                
+                // Update table
+                updateBalloonTable();
+            });
+        });
+        
+        // Update existing search functionality
+        document.getElementById('table-search').addEventListener('input', function() {
+            // Reset to first page when searching
+            document.getElementById('current-page').value = 1;
+            updateBalloonTable();
+        });
+        
+        // Initial analytics update
         updateAnalytics();
         
         // Set up periodic refresh every 5 minutes
         setInterval(updateAnalytics, 5 * 60 * 1000);
-    });
+});
 </script>
 {% endblock %}
