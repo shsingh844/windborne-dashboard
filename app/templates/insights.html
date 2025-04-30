@@ -356,14 +356,11 @@
     // Function to update wind impact chart with fallback data
     function updateWindImpactChart() {
         if (!balloonData || !balloonData.wind_patterns || Object.keys(balloonData.wind_patterns).length === 0) {
-            // Generate fallback data if none available
-            const fallbackData = generateFallbackWindData();
-            createWindImpactChart(fallbackData.labels, fallbackData.windSpeeds, fallbackData.balloonSpeeds);
-            
-            document.getElementById('wind-impact-insight').textContent = 
-                'Using estimated wind pattern data. This visualization shows the relationship between wind speed and balloon movement speed at different altitudes.';
+            console.log('No wind pattern data available for chart');
             return;
         }
+        
+        console.log('Updating wind impact chart with data:', balloonData.wind_patterns);
         
         // Prepare data
         const labels = [];
@@ -372,11 +369,16 @@
         
         // Extract data from wind patterns
         for (const [altitude, data] of Object.entries(balloonData.wind_patterns)) {
-            if (!data || !data.avg_speed) continue;
+            if (!data || !data.avg_speed) {
+                console.log(`Skipping ${altitude} due to missing data`);
+                continue;
+            }
             
             const altitudeLabel = altitude === 'low' ? 'Low (0-5km)' : 
                                 altitude === 'medium' ? 'Medium (5-15km)' : 
                                 'High (15km+)';
+            
+            console.log(`Processing ${altitudeLabel} with wind speed ${data.avg_speed}`);
             
             labels.push(altitudeLabel);
             windSpeeds.push(data.avg_speed);
@@ -385,42 +387,99 @@
             let totalSpeed = 0;
             let balloonCount = 0;
             
-            balloonData.balloons.forEach(balloon => {
-                if (balloon.avg_speed !== undefined && balloon.latest && balloon.latest.alt !== undefined) {
-                    const alt = balloon.latest.alt;
-                    
-                    if ((altitude === 'low' && alt < 5000) || 
-                        (altitude === 'medium' && alt >= 5000 && alt < 15000) ||
-                        (altitude === 'high' && alt >= 15000)) {
-                        totalSpeed += balloon.avg_speed;
-                        balloonCount++;
+            if (balloonData.balloons && balloonData.balloons.length > 0) {
+                balloonData.balloons.forEach(balloon => {
+                    if (balloon.avg_speed !== undefined && !isNaN(parseFloat(balloon.avg_speed)) && 
+                        balloon.latest && balloon.latest.alt !== undefined && !isNaN(parseFloat(balloon.latest.alt))) {
+                        
+                        const speed = parseFloat(balloon.avg_speed);
+                        const alt = parseFloat(balloon.latest.alt);
+                        
+                        if ((altitude === 'low' && alt < 5000) || 
+                            (altitude === 'medium' && alt >= 5000 && alt < 15000) ||
+                            (altitude === 'high' && alt >= 15000)) {
+                            totalSpeed += speed;
+                            balloonCount++;
+                            console.log(`Added balloon ${balloon.id} with speed ${speed} at altitude ${alt}m`);
+                        }
                     }
-                }
-            });
+                });
+            }
             
-            // If no balloons at this altitude, use estimated value based on wind speed
-            if (balloonCount === 0) {
-                // Estimate balloon speed as ~80% of wind speed (reasonable approximation)
-                balloonSpeeds.push(data.avg_speed * 0.8);
+            // Calculate average balloon speed for this altitude range
+            if (balloonCount > 0) {
+                const avgSpeed = totalSpeed / balloonCount;
+                balloonSpeeds.push(avgSpeed);
+                console.log(`Average balloon speed at ${altitudeLabel}: ${avgSpeed} based on ${balloonCount} balloons`);
             } else {
-                balloonSpeeds.push(totalSpeed / balloonCount);
+                // If no balloons found in this range, calculate from wind speed
+                // We know that balloons often move at about 80-95% of wind speed
+                const estimatedSpeed = data.avg_speed * 0.85;
+                balloonSpeeds.push(estimatedSpeed);
+                console.log(`Estimated balloon speed at ${altitudeLabel}: ${estimatedSpeed} (no balloons at this altitude)`);
             }
         }
         
         if (labels.length === 0) {
-            // Use fallback if we still don't have data
-            const fallbackData = generateFallbackWindData();
-            createWindImpactChart(fallbackData.labels, fallbackData.windSpeeds, fallbackData.balloonSpeeds);
-            
-            document.getElementById('wind-impact-insight').textContent = 
-                'Using placeholder data. Insufficient real data to analyze wind impact on balloon speed.';
+            console.log('No valid data for wind impact chart');
             return;
         }
         
         // Create or update chart
-        createWindImpactChart(labels, windSpeeds, balloonSpeeds);
+        const ctx = document.getElementById('wind-impact-chart').getContext('2d');
         
-        // Generate insight text
+        if (windImpactChart) {
+            windImpactChart.data.labels = labels;
+            windImpactChart.data.datasets[0].data = windSpeeds;
+            windImpactChart.data.datasets[1].data = balloonSpeeds;
+            windImpactChart.update();
+            console.log('Updated existing wind impact chart');
+        } else {
+            console.log('Creating new wind impact chart');
+            windImpactChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Wind Speed (km/h)',
+                            data: windSpeeds,
+                            backgroundColor: 'rgba(54, 162, 235, 0.7)',
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Balloon Speed (km/h)',
+                            data: balloonSpeeds,
+                            backgroundColor: 'rgba(255, 99, 132, 0.7)',
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            borderWidth: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Speed (km/h)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Altitude Range'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Generate insight text based on wind and balloon speeds
         generateWindInsightText(windSpeeds, balloonSpeeds);
     }
 
@@ -691,27 +750,59 @@
     // Function to update altitude vs weather chart
     function updateAltitudeWeatherChart() {
         if (!balloonData || !balloonData.balloons || balloonData.balloons.length === 0) {
-            document.getElementById('altitude-weather-insight').textContent = 
-                'Insufficient data to analyze altitude and weather relationships.';
+            console.log('No balloon data available for altitude-weather chart');
             return;
         }
         
-        // Simulate weather conditions at different altitudes
-        // In a real implementation, this would use actual weather data
+        console.log('Updating altitude vs weather chart with', balloonData.balloons.length, 'balloons');
+        
+        // Get real weather data for different altitudes if available
+        let weatherData = {};
+        let usingRealWeatherData = false;
+        
+        // Check if we have weather data from OpenWeather API
+        if (weatherApiKey && window.weatherData) {
+            weatherData = window.weatherData;
+            usingRealWeatherData = true;
+            console.log('Using real weather data from OpenWeather API');
+        } else {
+            console.log('No weather API data available, calculating approximate values');
+            
+            // Calculate approximate temperature at different altitudes
+            // Standard atmosphere model: temperature decreases by about 6.5°C per 1000m
+            const groundTemp = 15; // Assume 15°C at sea level as baseline
+            
+            weatherData = {
+                temperatures: {
+                    '0-5km': groundTemp - 3.25*6.5, // Average temp at 2500m
+                    '5-10km': groundTemp - 7.5*6.5,  // Average temp at 7500m
+                    '10-15km': groundTemp - 12.5*6.5, // Average temp at 12500m
+                    '15-20km': groundTemp - 17.5*6.5, // Average temp at 17500m
+                    '20km+': groundTemp - 22.5*6.5    // Average temp at 22500m
+                }
+            };
+        }
+        
+        // Altitude ranges
         const altitudeRanges = [
             '0-5km', '5-10km', '10-15km', '15-20km', '20km+'
         ];
         
-        const temperatureData = [-5, -20, -40, -55, -60];
-        const pressureData = [80, 50, 30, 10, 5];
-        const humidityData = [60, 40, 20, 10, 5];
+        // Get temperature data for each range
+        const temperatureData = altitudeRanges.map(range => {
+            if (usingRealWeatherData && weatherData.temperatures && weatherData.temperatures[range]) {
+                return weatherData.temperatures[range];
+            } else {
+                return weatherData.temperatures[range]; // Use our calculated values
+            }
+        });
         
         // Count balloons in each altitude range
         const balloonCounts = [0, 0, 0, 0, 0];
         
         balloonData.balloons.forEach(balloon => {
-            if (balloon.latest && balloon.latest.alt !== undefined) {
-                const altitude = balloon.latest.alt;
+            if (balloon.latest && balloon.latest.alt !== undefined && !isNaN(parseFloat(balloon.latest.alt))) {
+                const altitude = parseFloat(balloon.latest.alt);
                 
                 if (altitude < 5000) {
                     balloonCounts[0]++;
@@ -727,6 +818,9 @@
             }
         });
         
+        console.log('Balloon counts by altitude:', balloonCounts);
+        console.log('Temperature data by altitude:', temperatureData);
+        
         // Create or update chart
         const ctx = document.getElementById('altitude-weather-chart').getContext('2d');
         
@@ -734,7 +828,9 @@
             altitudeWeatherChart.data.datasets[0].data = temperatureData;
             altitudeWeatherChart.data.datasets[1].data = balloonCounts;
             altitudeWeatherChart.update();
+            console.log('Updated existing altitude-weather chart');
         } else {
+            console.log('Creating new altitude-weather chart');
             altitudeWeatherChart = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -790,6 +886,11 @@
         }
         
         // Generate insight text based on balloon distribution
+        updateAltitudeWeatherInsight(balloonCounts, temperatureData, altitudeRanges);
+    }
+
+    // Helper function to update the insight text
+    function updateAltitudeWeatherInsight(balloonCounts, temperatureData, altitudeRanges) {
         let maxIndex = 0;
         let maxCount = balloonCounts[0];
         
@@ -809,18 +910,18 @@
             const preferredTemp = temperatureData[maxIndex];
             
             insightText = `Balloons show a preference for the ${preferredAltitude} altitude range, ` +
-                          `where temperatures average around ${preferredTemp}°C. `;
+                        `where temperatures average around ${preferredTemp.toFixed(1)}°C. `;
             
             // Add more specific insights based on the distribution
             if (maxIndex === 0 || maxIndex === 1) {
                 insightText += 'Lower altitudes provide better satellite connectivity and easier control, ' +
-                               'but may expose balloons to more varied weather conditions.';
+                            'but may expose balloons to more varied weather conditions.';
             } else if (maxIndex === 2) {
                 insightText += 'Mid-range altitudes offer a balance between stable atmospheric conditions ' +
-                               'and operational control, making them optimal for most missions.';
+                            'and operational control, making them optimal for most missions.';
             } else {
                 insightText += 'Higher altitudes have more consistent wind patterns and reduced turbulence, ' +
-                               'but extremely cold temperatures may affect instrument performance.';
+                            'but extremely cold temperatures may affect instrument performance.';
             }
         }
         
@@ -830,33 +931,63 @@
     // Function to update performance chart
     function updatePerformanceChart() {
         if (!balloonData || !balloonData.balloons || balloonData.balloons.length === 0) {
-            document.getElementById('performance-insight').textContent = 
-                'Insufficient data to calculate performance metrics.';
+            console.log('No balloon data available for performance chart');
             return;
         }
+        
+        console.log('Updating performance chart with', balloonData.balloons.length, 'balloons');
         
         // Calculate performance index for each balloon
         const performanceData = [];
         
         balloonData.balloons.forEach(balloon => {
-            if (!balloon.avg_speed || !balloon.total_distance || !balloon.history_points) return;
+            // Log the balloon data to debug
+            console.log(`Processing balloon ${balloon.id} for performance index:`, 
+                    `speed: ${balloon.avg_speed}, distance: ${balloon.total_distance}, history points: ${balloon.history_points}`);
             
-            // Simple performance index based on speed, distance, and data points
+            // Use available metrics or defaults with extra validation
+            const avgSpeed = (balloon.avg_speed !== undefined && !isNaN(parseFloat(balloon.avg_speed))) 
+                ? parseFloat(balloon.avg_speed) : 0;
+            
+            const totalDistance = (balloon.total_distance !== undefined && !isNaN(parseFloat(balloon.total_distance)))
+                ? parseFloat(balloon.total_distance) : 0;
+            
+            const historyPoints = (balloon.history_points !== undefined && !isNaN(parseInt(balloon.history_points)))
+                ? parseInt(balloon.history_points) : 1;
+            
+            // Skip balloons with no meaningful metrics
+            if (avgSpeed === 0 && totalDistance === 0 && historyPoints <= 1) {
+                console.log(`Skipping balloon ${balloon.id} due to insufficient metrics`);
+                return;
+            }
+            
+            // Calculate performance index based on speed, distance, and data points
             const performance = (
-                (balloon.avg_speed / 100) * 0.4 + 
-                (Math.min(balloon.total_distance, 1000) / 1000) * 0.4 + 
-                (Math.min(balloon.history_points, 24) / 24) * 0.2
+                (avgSpeed / 100) * 0.4 + 
+                (Math.min(totalDistance, 1000) / 1000) * 0.4 + 
+                (Math.min(historyPoints, 24) / 24) * 0.2
             ) * 100;
+            
+            if (!isFinite(performance)) {
+                console.log(`Skipping balloon ${balloon.id} due to invalid performance calculation`);
+                return;
+            }
             
             performanceData.push({
                 id: balloon.id,
-                performance: performance
+                performance: performance,
+                metrics: {
+                    speed: avgSpeed,
+                    distance: totalDistance,
+                    historyPoints: historyPoints
+                }
             });
+            
+            console.log(`Calculated performance index for balloon ${balloon.id}: ${performance.toFixed(1)}`);
         });
         
         if (performanceData.length === 0) {
-            document.getElementById('performance-insight').textContent = 
-                'Insufficient data to calculate performance metrics.';
+            console.log('No valid performance data for any balloons');
             return;
         }
         
@@ -867,36 +998,50 @@
         const topPerformers = performanceData.slice(0, 10);
         
         // Prepare chart data
-        const labels = topPerformers.map(d => `Balloon ${d.id}`);
-        const data = topPerformers.map(d => d.performance);
+        const chartLabels = topPerformers.map(d => {
+            // Extract last part of ID for cleaner display
+            const idParts = d.id.split('_');
+            return `Balloon ${idParts[idParts.length - 2]}_${idParts[idParts.length - 1]}`;
+        });
+        
+        const chartData = topPerformers.map(d => d.performance);
+        const chartColors = chartData.map(value => {
+            if (value >= 80) return 'rgba(40, 167, 69, 0.7)';  // green
+            if (value >= 60) return 'rgba(23, 162, 184, 0.7)';  // blue
+            if (value >= 40) return 'rgba(255, 193, 7, 0.7)';  // yellow
+            return 'rgba(220, 53, 69, 0.7)';  // red
+        });
+        
+        const chartBorders = chartData.map(value => {
+            if (value >= 80) return 'rgba(40, 167, 69, 1)';
+            if (value >= 60) return 'rgba(23, 162, 184, 1)';
+            if (value >= 40) return 'rgba(255, 193, 7, 1)';
+            return 'rgba(220, 53, 69, 1)';
+        });
+        
+        console.log('Chart data prepared:', { labels: chartLabels, data: chartData });
         
         // Create or update chart
         const ctx = document.getElementById('performance-chart').getContext('2d');
         
         if (performanceChart) {
-            performanceChart.data.labels = labels;
-            performanceChart.data.datasets[0].data = data;
+            performanceChart.data.labels = chartLabels;
+            performanceChart.data.datasets[0].data = chartData;
+            performanceChart.data.datasets[0].backgroundColor = chartColors;
+            performanceChart.data.datasets[0].borderColor = chartBorders;
             performanceChart.update();
+            console.log('Updated existing performance chart');
         } else {
+            console.log('Creating new performance chart');
             performanceChart = new Chart(ctx, {
-                type: 'horizontalBar',
+                type: 'bar',
                 data: {
-                    labels: labels,
+                    labels: chartLabels,
                     datasets: [{
                         label: 'Performance Index',
-                        data: data,
-                        backgroundColor: data.map(value => {
-                            if (value >= 80) return 'rgba(40, 167, 69, 0.7)';  // green
-                            if (value >= 60) return 'rgba(23, 162, 184, 0.7)';  // blue
-                            if (value >= 40) return 'rgba(255, 193, 7, 0.7)';  // yellow
-                            return 'rgba(220, 53, 69, 0.7)';  // red
-                        }),
-                        borderColor: data.map(value => {
-                            if (value >= 80) return 'rgba(40, 167, 69, 1)';
-                            if (value >= 60) return 'rgba(23, 162, 184, 1)';
-                            if (value >= 40) return 'rgba(255, 193, 7, 1)';
-                            return 'rgba(220, 53, 69, 1)';
-                        }),
+                        data: chartData,
+                        backgroundColor: chartColors,
+                        borderColor: chartBorders,
                         borderWidth: 1
                     }]
                 },
@@ -919,9 +1064,25 @@
         }
         
         // Generate insight text
-        const avgPerformance = data.reduce((a, b) => a + b, 0) / data.length;
+        updatePerformanceInsight(chartData, topPerformers);
+    }
+
+    // Helper function to update the performance insight text
+    function updatePerformanceInsight(performanceValues, performers) {
+        if (!performanceValues || performanceValues.length === 0) {
+            document.getElementById('performance-insight').textContent = 
+                'Insufficient data to calculate performance metrics.';
+            return;
+        }
+        
+        const avgPerformance = performanceValues.reduce((a, b) => a + b, 0) / performanceValues.length;
+        
+        // Find the best performing balloon
+        const bestPerformer = performers[0];
         
         let insightText = `Average performance index: ${avgPerformance.toFixed(1)}. `;
+        insightText += `Top performer (${bestPerformer.id}) has speed: ${bestPerformer.metrics.speed.toFixed(1)} km/h, `;
+        insightText += `distance: ${bestPerformer.metrics.distance.toFixed(1)} km. `;
         
         if (avgPerformance >= 80) {
             insightText += 'The constellation is performing exceptionally well, with optimal speed and comprehensive data collection.';
@@ -930,7 +1091,7 @@
         } else if (avgPerformance >= 40) {
             insightText += 'Moderate performance levels. Consider reviewing balloon configurations and deployment strategies.';
         } else {
-            insightText += 'Performance below expected thresholds. Immediate review of constellation operations recommended.';
+            insightText += 'Performance below expected thresholds. Review of constellation operations may be beneficial.';
         }
         
         document.getElementById('performance-insight').textContent = insightText;
@@ -939,10 +1100,17 @@
     // Function to update deployment recommendations
     function updateDeploymentRecommendations() {
         if (!balloonData || !balloonData.wind_patterns || !balloonData.clusters) {
+            console.log('Insufficient data for deployment recommendations');
             document.getElementById('deployment-recommendations').innerHTML = 
                 '<p>Insufficient data to generate deployment recommendations.</p>';
             return;
         }
+        
+        console.log('Updating deployment recommendations with:', {
+            windPatterns: balloonData.wind_patterns,
+            clusters: balloonData.clusters,
+            balloonCount: balloonData.balloons ? balloonData.balloons.length : 0
+        });
         
         // Generate recommendations based on current data
         let recommendations = '';
@@ -953,31 +1121,73 @@
         const lowAltitudeWind = balloonData.wind_patterns.low;
         
         if (highAltitudeWind && highAltitudeWind.avg_speed) {
-            if (highAltitudeWind.avg_speed > 80) {
+            const highWindSpeed = parseFloat(highAltitudeWind.avg_speed);
+            
+            if (highWindSpeed > 80) {
                 recommendations += `
                     <div class="alert alert-warning mb-3">
-                        <strong>High-Altitude Warning:</strong> Strong winds (${highAltitudeWind.avg_speed.toFixed(1)} km/h) 
+                        <strong>High-Altitude Warning:</strong> Strong winds (${highWindSpeed.toFixed(1)} km/h) 
                         detected at high altitudes. Consider deploying new balloons at medium altitudes until conditions improve.
                     </div>
                 `;
-            } else if (highAltitudeWind.avg_speed < 20) {
+                console.log('Added high-altitude warning due to strong winds:', highWindSpeed);
+            } else if (highWindSpeed < 20) {
                 recommendations += `
                     <div class="alert alert-success mb-3">
                         <strong>High-Altitude Opportunity:</strong> Calm wind conditions 
-                        (${highAltitudeWind.avg_speed.toFixed(1)} km/h) at high altitudes. 
+                        (${highWindSpeed.toFixed(1)} km/h) at high altitudes. 
                         Ideal for precision deployments and scientific measurements.
                     </div>
                 `;
+                console.log('Added high-altitude opportunity due to calm winds:', highWindSpeed);
             }
         }
         
         // Check balloon distribution
+        if (balloonData.balloons && balloonData.balloons.length > 0) {
+            // Count balloons by altitude
+            const altitudeCounts = {
+                low: 0,
+                medium: 0,
+                high: 0
+            };
+            
+            balloonData.balloons.forEach(balloon => {
+                if (balloon.latest && balloon.latest.alt !== undefined) {
+                    const altitude = parseFloat(balloon.latest.alt);
+                    
+                    if (altitude < 5000) {
+                        altitudeCounts.low++;
+                    } else if (altitude < 15000) {
+                        altitudeCounts.medium++;
+                    } else {
+                        altitudeCounts.high++;
+                    }
+                }
+            });
+            
+            console.log('Balloon distribution by altitude:', altitudeCounts);
+            
+            // Check for altitude gaps
+            if (altitudeCounts.low === 0 || altitudeCounts.medium === 0 || altitudeCounts.high === 0) {
+                const missingRange = altitudeCounts.low === 0 ? 'low altitude (0-5km)' :
+                                altitudeCounts.medium === 0 ? 'medium altitude (5-15km)' :
+                                'high altitude (15km+)';
+                
+                recommendations += `
+                    <div class="alert alert-info mb-3">
+                        <strong>Coverage Gap:</strong> No balloons detected in the ${missingRange} range. 
+                        Consider deploying balloons at this altitude to ensure complete data collection.
+                    </div>
+                `;
+                console.log('Added coverage gap alert for:', missingRange);
+            }
+        }
+        
+        // Check geographical coverage
         const clusters = balloonData.clusters;
         
         if (clusters && clusters.length > 0) {
-            // Find regions with few or no balloons
-            const coveredRegions = new Set();
-            
             // Simplified world regions (just for demo)
             const regions = [
                 { name: 'North America', lat: 40, lon: -100 },
@@ -989,6 +1199,8 @@
             ];
             
             // Mark regions that are covered by existing balloons
+            const coveredRegions = new Set();
+            
             clusters.forEach(cluster => {
                 if (!cluster.center || !cluster.center.lat || !cluster.center.lon) return;
                 
@@ -1009,10 +1221,34 @@
             if (uncoveredRegions.length > 0) {
                 recommendations += `
                     <div class="alert alert-info mb-3">
-                        <strong>Coverage Gap:</strong> Consider deploying balloons in 
+                        <strong>Geographic Coverage Gap:</strong> Consider deploying balloons in 
                         ${uncoveredRegions.map(r => r.name).join(', ')} to improve global coverage.
                     </div>
                 `;
+                console.log('Added geographic coverage gap alert for:', uncoveredRegions.map(r => r.name).join(', '));
+            }
+        }
+        
+        // Determine optimal launch settings based on wind patterns
+        let optimalAltitude = '5,000-10,000m';
+        let recommendedAscentRate = '5 m/s';
+        let communicationInterval = '30 minutes';
+        
+        if (mediumAltitudeWind && mediumAltitudeWind.avg_speed) {
+            if (parseFloat(mediumAltitudeWind.avg_speed) > 40) {
+                optimalAltitude = '10,000-15,000m';
+                recommendedAscentRate = '4 m/s';
+            }
+        }
+        
+        if (lowAltitudeWind && lowAltitudeWind.avg_speed && highAltitudeWind && highAltitudeWind.avg_speed) {
+            const lowSpeed = parseFloat(lowAltitudeWind.avg_speed);
+            const highSpeed = parseFloat(highAltitudeWind.avg_speed);
+            
+            if (lowSpeed < 20 && highSpeed > 50) {
+                communicationInterval = '20 minutes';
+            } else if (highSpeed > 80) {
+                communicationInterval = '15 minutes';
             }
         }
         
@@ -1021,20 +1257,16 @@
             <h6>Recommended Deployment Settings:</h6>
             <ul class="list-group list-group-flush">
                 <li class="list-group-item">
-                    <strong>Optimal Launch Altitude:</strong> 
-                    ${mediumAltitudeWind && mediumAltitudeWind.avg_speed < 40 ? '5,000-10,000m' : '10,000-15,000m'}
+                    <strong>Optimal Launch Altitude:</strong> ${optimalAltitude}
                 </li>
                 <li class="list-group-item">
-                    <strong>Recommended Ascent Rate:</strong> 
-                    5 m/s with adjustments based on local conditions
+                    <strong>Recommended Ascent Rate:</strong> ${recommendedAscentRate} with adjustments based on local conditions
                 </li>
                 <li class="list-group-item">
-                    <strong>Ballast Configuration:</strong> 
-                    Standard + 15% reserve for variable weather conditions
+                    <strong>Ballast Configuration:</strong> Standard + 15% reserve for variable weather conditions
                 </li>
                 <li class="list-group-item">
-                    <strong>Communication Check Interval:</strong> 
-                    30 minutes or 60 minutes in remote regions
+                    <strong>Communication Check Interval:</strong> ${communicationInterval} in standard regions
                 </li>
             </ul>
         `;
@@ -1045,55 +1277,115 @@
     // Function to update anomaly detection
     function updateAnomalyDetection() {
         if (!balloonData || !balloonData.balloons || balloonData.balloons.length === 0) {
+            console.log('No balloon data available for anomaly detection');
             document.getElementById('anomaly-detection').innerHTML = 
                 '<p>Insufficient data to detect anomalies.</p>';
             return;
         }
         
+        console.log('Detecting anomalies in', balloonData.balloons.length, 'balloons');
+        
         // Identify potential anomalies in balloon behavior
         const anomalies = [];
         
-        // Check for unusually high or low speeds
-        const speeds = balloonData.balloons
-            .filter(b => b.avg_speed !== undefined)
-            .map(b => b.avg_speed);
+        // Calculate average metrics for comparison
+        const speeds = [];
+        const distances = [];
+        const altitudes = [];
+        const altitudeChanges = [];
         
-        if (speeds.length > 0) {
-            const avgSpeed = speeds.reduce((a, b) => a + b, 0) / speeds.length;
-            const stdDev = Math.sqrt(speeds.reduce((a, b) => a + Math.pow(b - avgSpeed, 2), 0) / speeds.length);
+        // First pass to collect metrics
+        balloonData.balloons.forEach(balloon => {
+            if (balloon.avg_speed !== undefined && !isNaN(parseFloat(balloon.avg_speed))) {
+                speeds.push(parseFloat(balloon.avg_speed));
+            }
             
-            const speedThreshold = avgSpeed + 2 * stdDev;
+            if (balloon.total_distance !== undefined && !isNaN(parseFloat(balloon.total_distance))) {
+                distances.push(parseFloat(balloon.total_distance));
+            }
             
-            balloonData.balloons.forEach(balloon => {
-                if (balloon.avg_speed && balloon.avg_speed > speedThreshold) {
+            if (balloon.latest && balloon.latest.alt !== undefined && !isNaN(parseFloat(balloon.latest.alt))) {
+                altitudes.push(parseFloat(balloon.latest.alt));
+            }
+            
+            if (balloon.altitude_change !== undefined && !isNaN(parseFloat(balloon.altitude_change))) {
+                altitudeChanges.push(parseFloat(balloon.altitude_change));
+            }
+        });
+        
+        // Calculate averages and standard deviations
+        const avgSpeed = speeds.length > 0 ? speeds.reduce((a, b) => a + b, 0) / speeds.length : 0;
+        const avgDistance = distances.length > 0 ? distances.reduce((a, b) => a + b, 0) / distances.length : 0;
+        const avgAltitude = altitudes.length > 0 ? altitudes.reduce((a, b) => a + b, 0) / altitudes.length : 0;
+        
+        // Calculate standard deviations
+        const speedStdDev = calculateStdDev(speeds, avgSpeed);
+        const distanceStdDev = calculateStdDev(distances, avgDistance);
+        const altitudeStdDev = calculateStdDev(altitudes, avgAltitude);
+        
+        console.log('Calculated metrics:', {
+            avgSpeed, speedStdDev,
+            avgDistance, distanceStdDev,
+            avgAltitude, altitudeStdDev
+        });
+        
+        // Second pass to identify anomalies
+        balloonData.balloons.forEach(balloon => {
+            // Check for unusually high or low speeds
+            if (balloon.avg_speed !== undefined && !isNaN(parseFloat(balloon.avg_speed))) {
+                const speed = parseFloat(balloon.avg_speed);
+                if (Math.abs(speed - avgSpeed) > 2 * speedStdDev && speed > avgSpeed) {
                     anomalies.push({
                         id: balloon.id,
                         type: 'speed',
-                        message: `Unusually high speed (${balloon.avg_speed.toFixed(1)} km/h vs. avg ${avgSpeed.toFixed(1)} km/h)`
+                        message: `Unusually high speed (${speed.toFixed(1)} km/h vs. avg ${avgSpeed.toFixed(1)} km/h)`
                     });
+                    console.log(`Anomaly detected: Balloon ${balloon.id} has unusually high speed: ${speed}`);
+                } else if (Math.abs(speed - avgSpeed) > 2 * speedStdDev && speed < avgSpeed && speed > 0) {
+                    anomalies.push({
+                        id: balloon.id,
+                        type: 'speed',
+                        message: `Unusually low speed (${speed.toFixed(1)} km/h vs. avg ${avgSpeed.toFixed(1)} km/h)`
+                    });
+                    console.log(`Anomaly detected: Balloon ${balloon.id} has unusually low speed: ${speed}`);
                 }
-            });
-        }
-        
-        // Check for unusual altitude changes
-        balloonData.balloons.forEach(balloon => {
+            }
+            
+            // Check for unusual altitude changes
             if (balloon.altitude_change && Math.abs(balloon.altitude_change) > 2000) {
                 anomalies.push({
                     id: balloon.id,
                     type: 'altitude',
                     message: `Significant altitude change (${balloon.altitude_change.toFixed(0)} m)`
                 });
+                console.log(`Anomaly detected: Balloon ${balloon.id} has significant altitude change: ${balloon.altitude_change}`);
             }
-        });
-        
-        // Check for balloons that haven't moved much
-        balloonData.balloons.forEach(balloon => {
-            if (balloon.history_points > 5 && balloon.total_distance !== undefined && balloon.total_distance < 50) {
-                anomalies.push({
-                    id: balloon.id,
-                    type: 'movement',
-                    message: `Limited movement (${balloon.total_distance.toFixed(1)} km) despite ${balloon.history_points} data points`
-                });
+            
+            // Check for balloons that haven't moved much
+            if (balloon.history_points > 5 && balloon.total_distance !== undefined && 
+                !isNaN(parseFloat(balloon.total_distance))) {
+                const distance = parseFloat(balloon.total_distance);
+                if (distance < 50 && distance > 0) {
+                    anomalies.push({
+                        id: balloon.id,
+                        type: 'movement',
+                        message: `Limited movement (${distance.toFixed(1)} km) despite ${balloon.history_points} data points`
+                    });
+                    console.log(`Anomaly detected: Balloon ${balloon.id} has limited movement: ${distance} km`);
+                }
+            }
+            
+            // Check for unusual altitude compared to others
+            if (balloon.latest && balloon.latest.alt !== undefined && !isNaN(parseFloat(balloon.latest.alt))) {
+                const altitude = parseFloat(balloon.latest.alt);
+                if (Math.abs(altitude - avgAltitude) > 2.5 * altitudeStdDev) {
+                    anomalies.push({
+                        id: balloon.id,
+                        type: 'altitude',
+                        message: `Unusual altitude (${altitude.toFixed(0)} m vs. avg ${avgAltitude.toFixed(0)} m)`
+                    });
+                    console.log(`Anomaly detected: Balloon ${balloon.id} has unusual altitude: ${altitude}`);
+                }
             }
         });
         
@@ -1103,7 +1395,7 @@
                 '<p class="text-success">No anomalies detected in the current constellation data.</p>';
         } else {
             let html = `
-                <p>Detected ${anomalies.length} potential anomaly/anomalies that may require attention:</p>
+                <p>Detected ${anomalies.length} potential ${anomalies.length === 1 ? 'anomaly' : 'anomalies'} that may require attention:</p>
                 <div class="list-group">
             `;
             
@@ -1142,6 +1434,14 @@
             html += '</div>';
             document.getElementById('anomaly-detection').innerHTML = html;
         }
+    }
+
+    // Helper function to calculate standard deviation
+    function calculateStdDev(values, mean) {
+        if (values.length <= 1) return 0;
+        
+        const variance = values.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / values.length;
+        return Math.sqrt(variance);
     }
     
     // Event listener for weather overlay radio buttons

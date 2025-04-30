@@ -74,181 +74,205 @@
         </div>
     </div>
 </div>
+
+<!-- Map container -->
+<div class="row">
+    <div class="col-md-9">
+        <div class="card">
+            <div class="card-body p-0">
+                <div id="map-container"></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="controls-panel mb-3">
+            <h5>Display Options</h5>
+            <div class="layer-control">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="show-trajectories" checked>
+                    <label class="form-check-label" for="show-trajectories">Show Trajectories</label>
+                </div>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="show-clusters" checked>
+                    <label class="form-check-label" for="show-clusters">Show Clusters</label>
+                </div>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="show-wind-patterns">
+                    <label class="form-check-label" for="show-wind-patterns">Show Wind Patterns</label>
+                </div>
+            </div>
+            
+            <div class="mb-3">
+                <label for="altitude-filter" class="form-label">Altitude Filter</label>
+                <select class="form-select" id="altitude-filter">
+                    <option value="all" selected>All Altitudes</option>
+                    <option value="low">Low (0-5km)</option>
+                    <option value="medium">Medium (5-15km)</option>
+                    <option value="high">High (15km+)</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="controls-panel">
+            <h5>Balloon List</h5>
+            <div class="input-group mb-3">
+                <input type="text" class="form-control" id="balloon-search" placeholder="Search by ID">
+                <button class="btn btn-outline-secondary" type="button" id="search-btn">
+                    <i class="bi bi-search"></i>
+                </button>
+            </div>
+            
+            <div class="balloon-list" id="balloon-list">
+                <div class="text-center py-3">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Loading balloons...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
-<script>
-    // Initialize the map
-    const map = L.map('map-container').setView([20, 0], 2);
-    
-    // Add the base map layer
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }).addTo(map);
-    
-    // Layer groups for different map elements
-    const balloonMarkersGroup = L.layerGroup().addTo(map);
-    const trajectoriesGroup = L.layerGroup().addTo(map);
-    const clustersGroup = L.layerGroup().addTo(map);
-    const windPatternsGroup = L.layerGroup();
-    
-    // Map data storage
-    let balloonData = null;
-    let selectedBalloonId = null;
-    
+<script>      
     // Function to update the map with latest data
     async function updateMap() {
-        try {
-            // Show loading indicator
-            document.getElementById('last-updated').textContent = 'Loading...';
-            
-            // Fetch balloon data from our API
-            const response = await fetch('/api/balloons');
-            balloonData = await response.json();
-            
-            if (!balloonData) {
-                console.error('No data received from API');
-                document.getElementById('last-updated').textContent = 'Error: No data available';
-                
-                // Show a message on the map
-                if (!document.getElementById('no-data-message')) {
-                    const noDataMessage = document.createElement('div');
-                    noDataMessage.id = 'no-data-message';
-                    noDataMessage.style.position = 'absolute';
-                    noDataMessage.style.top = '50%';
-                    noDataMessage.style.left = '50%';
-                    noDataMessage.style.transform = 'translate(-50%, -50%)';
-                    noDataMessage.style.padding = '15px';
-                    noDataMessage.style.backgroundColor = 'rgba(255,255,255,0.8)';
-                    noDataMessage.style.borderRadius = '5px';
-                    noDataMessage.style.zIndex = '1000';
-                    noDataMessage.innerHTML = '<h4>No balloon data available</h4><p>Please try refreshing later.</p>';
-                    document.getElementById('map-container').appendChild(noDataMessage);
-                }
-                return;
-            }
-            
-            // Remove no-data message if it exists
-            const noDataMessage = document.getElementById('no-data-message');
-            if (noDataMessage) {
-                noDataMessage.remove();
-            }
-            
-            // Update last updated time
-            document.getElementById('last-updated').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
-            
-            // Initialize the map if it doesn't exist yet
-            if (!map) {
-                // Create the map centered on a default location
-                map = L.map('map-container').setView([20, 0], 2);
-                
-                // Add the base map layer
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                }).addTo(map);
-                
-                // Create layer groups
-                balloonMarkersGroup = L.layerGroup().addTo(map);
-                trajectoriesGroup = L.layerGroup().addTo(map);
-                clustersGroup = L.layerGroup().addTo(map);
-                windPatternsGroup = L.layerGroup();
-                
-                // Initialize state variables
-                selectedBalloonId = null;
-                
-                // Add UI listeners (these will be called only once)
-                initializeMapControls();
-            } else {
-                // Clear existing markers and paths
-                balloonMarkersGroup.clearLayers();
-                trajectoriesGroup.clearLayers();
-                clustersGroup.clearLayers();
-                windPatternsGroup.clearLayers();
-            }
-            
-            // Check if we have any balloons to display
-            if (!balloonData.balloons || balloonData.balloons.length === 0) {
-                // Display a message on the map if no balloons
-                if (!document.getElementById('no-balloons-message')) {
-                    const noBallonsMessage = document.createElement('div');
-                    noBallonsMessage.id = 'no-balloons-message';
-                    noBallonsMessage.style.position = 'absolute';
-                    noBallonsMessage.style.top = '50%';
-                    noBallonsMessage.style.left = '50%';
-                    noBallonsMessage.style.transform = 'translate(-50%, -50%)';
-                    noBallonsMessage.style.padding = '15px';
-                    noBallonsMessage.style.backgroundColor = 'rgba(255,255,255,0.8)';
-                    noBallonsMessage.style.borderRadius = '5px';
-                    noBallonsMessage.style.zIndex = '1000';
-                    noBallonsMessage.innerHTML = '<h4>No balloons detected</h4><p>Data is available but no balloons were found in the current data.</p>';
-                    document.getElementById('map-container').appendChild(noBallonsMessage);
-                }
-                
-                // Still update the balloon list to show empty state
-                updateBalloonList();
-                return;
-            }
-            
-            // Remove no-balloons message if it exists
-            const noBallonsMessage = document.getElementById('no-balloons-message');
-            if (noBallonsMessage) {
-                noBallonsMessage.remove();
-            }
-            
-            // Update balloon markers
-            updateBalloonMarkers();
-            
-            // Update trajectories if enabled
-            if (document.getElementById('show-trajectories').checked) {
-                updateTrajectories();
-            }
-            
-            // Update clusters if enabled
-            if (document.getElementById('show-clusters').checked) {
-                updateClusters();
-            }
-            
-            // Update wind patterns if enabled
-            if (document.getElementById('show-wind-patterns').checked) {
-                updateWindPatterns();
-            }
-            
-            // Update balloon list
-            updateBalloonList();
-            
-        } catch (error) {
-            console.error('Error updating map:', error);
-            document.getElementById('last-updated').textContent = 'Error updating data';
+    try {
+        // Show loading indicator
+        document.getElementById('last-updated').textContent = 'Loading...';
+        
+        // Fetch balloon data from our API
+        const response = await fetch('/api/balloons');
+        
+        if (!response.ok) {
+            throw new Error(`API response not OK: ${response.status} ${response.statusText}`);
         }
+        
+        const data = await response.json();
+        window.balloonData = data;
+        
+        if (!data) {
+            console.error('No data received from API');
+            document.getElementById('last-updated').textContent = 'Error: No data available';
+            
+            // Show a message on the map
+            if (!document.getElementById('no-data-message')) {
+                const noDataMessage = document.createElement('div');
+                noDataMessage.id = 'no-data-message';
+                noDataMessage.style.position = 'absolute';
+                noDataMessage.style.top = '50%';
+                noDataMessage.style.left = '50%';
+                noDataMessage.style.transform = 'translate(-50%, -50%)';
+                noDataMessage.style.padding = '15px';
+                noDataMessage.style.backgroundColor = 'rgba(255,255,255,0.8)';
+                noDataMessage.style.borderRadius = '5px';
+                noDataMessage.style.zIndex = '1000';
+                noDataMessage.innerHTML = '<h4>No balloon data available</h4><p>Please try refreshing later.</p>';
+                document.getElementById('map-container').appendChild(noDataMessage);
+            }
+            return;
+        }
+        
+        // Remove no-data message if it exists
+        const noDataMessage = document.getElementById('no-data-message');
+        if (noDataMessage) {
+            noDataMessage.remove();
+        }
+        
+        // Update last updated time
+        document.getElementById('last-updated').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+        
+        // Clear existing markers and paths
+        window.balloonMarkersGroup.clearLayers();
+        window.trajectoriesGroup.clearLayers();
+        window.clustersGroup.clearLayers();
+        window.windPatternsGroup.clearLayers();
+        
+        // Check if we have any balloons to display
+        if (!data.balloons || data.balloons.length === 0) {
+            // Display a message on the map if no balloons
+            if (!document.getElementById('no-balloons-message')) {
+                const noBallonsMessage = document.createElement('div');
+                noBallonsMessage.id = 'no-balloons-message';
+                noBallonsMessage.style.position = 'absolute';
+                noBallonsMessage.style.top = '50%';
+                noBallonsMessage.style.left = '50%';
+                noBallonsMessage.style.transform = 'translate(-50%, -50%)';
+                noBallonsMessage.style.padding = '15px';
+                noBallonsMessage.style.backgroundColor = 'rgba(255,255,255,0.8)';
+                noBallonsMessage.style.borderRadius = '5px';
+                noBallonsMessage.style.zIndex = '1000';
+                noBallonsMessage.innerHTML = '<h4>No balloons detected</h4><p>Data is available but no balloons were found in the current data.</p>';
+                document.getElementById('map-container').appendChild(noBallonsMessage);
+            }
+            
+            // Still update the balloon list to show empty state
+            updateBalloonList();
+            return;
+        }
+        
+        // Remove no-balloons message if it exists
+        const noBallonsMessage = document.getElementById('no-balloons-message');
+        if (noBallonsMessage) {
+            noBallonsMessage.remove();
+        }
+        
+        // Update balloon markers
+        updateBalloonMarkers();
+        
+        // Update trajectories if enabled
+        if (document.getElementById('show-trajectories') && document.getElementById('show-trajectories').checked) {
+            updateTrajectories();
+        }
+        
+        // Update clusters if enabled
+        if (document.getElementById('show-clusters') && document.getElementById('show-clusters').checked) {
+            updateClusters();
+        }
+        
+        // Update wind patterns if enabled
+        if (document.getElementById('show-wind-patterns') && document.getElementById('show-wind-patterns').checked) {
+            updateWindPatterns();
+        }
+        
+        // Update balloon list
+        updateBalloonList();
+        
+    } catch (error) {
+        console.error('Error updating map:', error);
+        document.getElementById('last-updated').textContent = `Error: ${error.message}`;
     }
+}
 
 // Function to initialize map controls
 function initializeMapControls() {
     // Event listeners for control toggles
     document.getElementById('show-trajectories').addEventListener('change', function() {
         if (this.checked) {
-            map.addLayer(trajectoriesGroup);
+            window.map.addLayer(window.trajectoriesGroup);
             updateTrajectories();
         } else {
-            map.removeLayer(trajectoriesGroup);
+            window.map.removeLayer(window.trajectoriesGroup);
         }
     });
     
     document.getElementById('show-clusters').addEventListener('change', function() {
         if (this.checked) {
-            map.addLayer(clustersGroup);
+            window.map.addLayer(clustersGroup);
             updateClusters();
         } else {
-            map.removeLayer(clustersGroup);
+            window.map.removeLayer(clustersGroup);
         }
     });
     
     document.getElementById('show-wind-patterns').addEventListener('change', function() {
         if (this.checked) {
-            map.addLayer(windPatternsGroup);
+            window.map.addLayer(windPatternsGroup);
             updateWindPatterns();
         } else {
-            map.removeLayer(windPatternsGroup);
+            window.map.removeLayer(windPatternsGroup);
         }
     });
     
@@ -283,31 +307,17 @@ function initializeMapControls() {
     });
     
     // Handle popup button clicks
-    map.on('popupopen', function(e) {
+    window.map.on('popupopen', function(e) {
         const trackButtons = document.querySelectorAll('.track-balloon-btn');
         trackButtons.forEach(button => {
             button.addEventListener('click', function() {
                 selectedBalloonId = this.dataset.balloonId;
                 updateMap();
-                map.closePopup();
+                window.map.closePopup();
             });
         });
     });
 }
-
-// Make sure initialization happens only once when the DOM is loaded
-let mapInitialized = false;
-
-document.addEventListener('DOMContentLoaded', () => {
-    if (!mapInitialized) {
-        mapInitialized = true;
-        // Run initial update
-        updateMap();
-        
-        // Set up periodic refresh every 5 minutes
-        setInterval(updateMap, 5 * 60 * 1000);
-    }
-});
     
     // Function to update balloon markers
     function updateBalloonMarkers() {
@@ -396,7 +406,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             
             // Add to the layer group
-            balloonMarkersGroup.addLayer(marker);
+            window.balloonMarkersGroup.addLayer(marker);
         });
     }
     
@@ -427,7 +437,7 @@ document.addEventListener('DOMContentLoaded', () => {
             );
             
             // Add to the layer group
-            trajectoriesGroup.addLayer(path);
+            window.trajectoriesGroup.addLayer(path);
             
             // Add arrow markers to indicate direction
             if (validPoints.length >= 3) {
@@ -462,7 +472,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                     
                     // Add to the layer group
-                    trajectoriesGroup.addLayer(marker);
+                    window.trajectoriesGroup.addLayer(marker);
                 }
             }
         }
@@ -495,7 +505,7 @@ document.addEventListener('DOMContentLoaded', () => {
             `);
             
             // Add to the layer group
-            clustersGroup.addLayer(marker);
+            window.clustersGroup.addLayer(marker);
         });
     }
     
@@ -576,17 +586,17 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             
             // Add to the layer group
-            windPatternsGroup.addLayer(arrow);
-            windPatternsGroup.addLayer(arrowhead1);
-            windPatternsGroup.addLayer(arrowhead2);
-            windPatternsGroup.addLayer(label);
+            window.windPatternsGroup.addLayer(arrow);
+            window.windPatternsGroup.addLayer(arrowhead1);
+            window.windPatternsGroup.addLayer(arrowhead2);
+            window.windPatternsGroup.addLayer(label);
         }
         
         // Add or remove the wind patterns layer based on toggle
         if (document.getElementById('show-wind-patterns').checked) {
-            map.addLayer(windPatternsGroup);
+            window.map.addLayer(windPatternsGroup);
         } else {
-            map.removeLayer(windPatternsGroup);
+            window.map.removeLayer(windPatternsGroup);
         }
     }
     
@@ -659,7 +669,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 // Center map on balloon if it exists
                 if (balloon && balloon.latest && balloon.latest.lat && balloon.latest.lon) {
-                    map.setView([balloon.latest.lat, balloon.latest.lon], 5);
+                    window.map.setView([balloon.latest.lat, balloon.latest.lon], 5);
                 }
                 
                 // Update map to highlight selected balloon
@@ -669,136 +679,108 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // Event listeners for control toggles
-    document.getElementById('show-trajectories').addEventListener('change', function() {
-        if (this.checked) {
-            map.addLayer(trajectoriesGroup);
-            updateTrajectories();
-        } else {
-            map.removeLayer(trajectoriesGroup);
-        }
-    });
+    // document.getElementById('show-trajectories').addEventListener('change', function() {
+    //     if (this.checked) {
+    //         window.map.addLayer(trajectoriesGroup);
+    //         updateTrajectories();
+    //     } else {
+    //         window.map.removeLayer(trajectoriesGroup);
+    //     }
+    // });
     
-    document.getElementById('show-clusters').addEventListener('change', function() {
-        if (this.checked) {
-            map.addLayer(clustersGroup);
-            updateClusters();
-        } else {
-            map.removeLayer(clustersGroup);
-        }
-    });
+    // document.getElementById('show-clusters').addEventListener('change', function() {
+    //     if (this.checked) {
+    //         window.map.addLayer(clustersGroup);
+    //         updateClusters();
+    //     } else {
+    //         window.map.removeLayer(clustersGroup);
+    //     }
+    // });
     
-    document.getElementById('show-wind-patterns').addEventListener('change', function() {
-        if (this.checked) {
-            map.addLayer(windPatternsGroup);
-            updateWindPatterns();
-        } else {
-            map.removeLayer(windPatternsGroup);
-        }
-    });
+    // document.getElementById('show-wind-patterns').addEventListener('change', function() {
+    //     if (this.checked) {
+    //         window.map.addLayer(windPatternsGroup);
+    //         updateWindPatterns();
+    //     } else {
+    //         window.map.removeLayer(windPatternsGroup);
+    //     }
+    // });
     
-    document.getElementById('altitude-filter').addEventListener('change', function() {
-        updateMap();
-    });
+    // document.getElementById('altitude-filter').addEventListener('change', function() {
+    //     updateMap();
+    // });
     
-    // Search functionality
-    document.getElementById('search-btn').addEventListener('click', function() {
-        updateBalloonList();
-    });
+    // // Search functionality
+    // document.getElementById('search-btn').addEventListener('click', function() {
+    //     updateBalloonList();
+    // });
     
-    document.getElementById('balloon-search').addEventListener('keyup', function(event) {
-        if (event.key === 'Enter') {
-            updateBalloonList();
-        }
-    });
+    // document.getElementById('balloon-search').addEventListener('keyup', function(event) {
+    //     if (event.key === 'Enter') {
+    //         updateBalloonList();
+    //     }
+    // });
     
-    // Refresh button
-    document.getElementById('refresh-map-btn').addEventListener('click', async function() {
-        this.disabled = true;
-        document.getElementById('last-updated').textContent = 'Refreshing data...';
+    // // Refresh button
+    // document.getElementById('refresh-map-btn').addEventListener('click', async function() {
+    //     this.disabled = true;
+    //     document.getElementById('last-updated').textContent = 'Refreshing data...';
         
-        // Request data refresh
-        await fetch('/api/refresh');
+    //     // Request data refresh
+    //     await fetch('/api/refresh');
         
-        // Wait a moment for refresh to complete
-        setTimeout(() => {
-            updateMap();
-            this.disabled = false;
-        }, 2000);
-    });
+    //     // Wait a moment for refresh to complete
+    //     setTimeout(() => {
+    //         updateMap();
+    //         this.disabled = false;
+    //     }, 2000);
+    // });
     
-    // Initialize map on page load
+    // // Handle popup button clicks
+    // window.map.on('popupopen', function(e) {
+    //     const trackButtons = document.querySelectorAll('.track-balloon-btn');
+    //     trackButtons.forEach(button => {
+    //         button.addEventListener('click', function() {
+    //             selectedBalloonId = this.dataset.balloonId;
+    //             updateMap();
+    //             window.map.closePopup();
+    //         });
+    //     });
+    // });
+
+    // Initialize map update
     document.addEventListener('DOMContentLoaded', () => {
-        updateMap();
-        
-        // Set up periodic refresh every 5 minutes
-        setInterval(updateMap, 5 * 60 * 1000);
-    });
-    
-    // Handle popup button clicks
-    map.on('popupopen', function(e) {
-        const trackButtons = document.querySelectorAll('.track-balloon-btn');
-        trackButtons.forEach(button => {
-            button.addEventListener('click', function() {
-                selectedBalloonId = this.dataset.balloonId;
-                updateMap();
-                map.closePopup();
-            });
-        });
+        // Make sure the map container exists before initializing
+        if (document.getElementById('map-container')) {
+            // Initialize map
+            window.map = L.map('map-container').setView([20, 0], 2);
+            
+            // Add the base map layer
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(window.map);
+            
+            // Create layer groups for different map elements
+            window.balloonMarkersGroup = L.layerGroup().addTo(window.map);
+            window.trajectoriesGroup = L.layerGroup().addTo(window.map);
+            window.clustersGroup = L.layerGroup().addTo(window.map);
+            window.windPatternsGroup = L.layerGroup();
+            
+            // Map data storage
+            window.balloonData = null;
+            window.selectedBalloonId = null;
+            
+            // Initialize controls
+            initializeMapControls();
+            
+            // Load data
+            updateMap();
+            
+            // Set up periodic refresh every 5 minutes
+            setInterval(updateMap, 5 * 60 * 1000);
+        } else {
+            console.error('Map container element not found!');
+        }
     });
 </script>
 {% endblock %}
-
-<div class="row">
-    <div class="col-md-9">
-        <div class="card">
-            <div class="card-body p-0">
-                <div id="map-container"></div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="controls-panel mb-3">
-            <h5>Display Options</h5>
-            <div class="layer-control">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="show-trajectories" checked>
-                    <label class="form-check-label" for="show-trajectories">Show Trajectories</label>
-                </div>
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="show-clusters" checked>
-                    <label class="form-check-label" for="show-clusters">Show Clusters</label>
-                </div>
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="show-wind-patterns">
-                    <label class="form-check-label" for="show-wind-patterns">Show Wind Patterns</label>
-                </div>
-            </div>
-            
-            <div class="mb-3">
-                <label for="altitude-filter" class="form-label">Altitude Filter</label>
-                <select class="form-select" id="altitude-filter">
-                    <option value="all" selected>All Altitudes</option>
-                    <option value="low">Low (0-5km)</option>
-                    <option value="medium">Medium (5-15km)</option>
-                    <option value="high">High (15km+)</option>
-                </select>
-            </div>
-        </div>
-        
-        <div class="controls-panel">
-            <h5>Balloon List</h5>
-            <div class="input-group mb-3">
-                <input type="text" class="form-control" id="balloon-search" placeholder="Search by ID">
-                <button class="btn btn-outline-secondary" type="button" id="search-btn">
-                    <i class="bi bi-search"></i>
-                </button>
-            </div>
-            
-            <div class="balloon-list" id="balloon-list">
-                <div class="text-center py-3">
-                    <div class="spinner-border text-primary" role="status">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                    <p class="mt-2">Loading balloons...</p>
-                </div>
-            </div>

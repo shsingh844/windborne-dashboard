@@ -146,6 +146,8 @@ class DataProcessor:
         
         return sanitized_result
     
+    # Update the _calculate_balloon_metrics function in data_processor.py
+
     def _calculate_balloon_metrics(self, history: List[Dict]) -> Dict[str, Any]:
         """
         Calculate metrics for a balloon based on its history.
@@ -188,9 +190,12 @@ class DataProcessor:
             )
             
             # Time difference in hours (default to 1 hour if timestamp missing)
-            time_diff_hours = (curr.get("timestamp", 0) - prev.get("timestamp", 0)) / 3600
-            if time_diff_hours <= 0:
-                time_diff_hours = 1  # Default to 1 hour if invalid time difference
+            time_diff_hours = 1.0  # Default time difference
+            if "timestamp" in curr and "timestamp" in prev:
+                time_diff_secs = curr.get("timestamp", 0) - prev.get("timestamp", 0)
+                time_diff_hours = time_diff_secs / 3600
+                if time_diff_hours <= 0:
+                    time_diff_hours = 1.0  # Default to 1 hour if invalid time difference
             
             # Speed in km/h
             speed = distance / time_diff_hours

@@ -259,48 +259,70 @@
     
     // Function to update summary metrics
     function updateSummaryMetrics() {
-        if (!balloonData || !balloonData.balloons || balloonData.balloons.length === 0) return;
+        if (!balloonData || !balloonData.balloons || balloonData.balloons.length === 0) {
+            console.log('No balloon data available for metrics');
+            return;
+        }
+        
+        console.log('Updating summary metrics with', balloonData.balloons.length, 'balloons');
         
         // Calculate average trajectory length
         let totalDistance = 0;
         let balloonsWithDistance = 0;
         
         balloonData.balloons.forEach(balloon => {
-            if (balloon.total_distance) {
+            if (balloon.total_distance !== undefined && balloon.total_distance !== null && !isNaN(balloon.total_distance)) {
                 totalDistance += balloon.total_distance;
                 balloonsWithDistance++;
+                console.log(`Balloon ${balloon.id} distance: ${balloon.total_distance}`);
             }
         });
         
         const avgTrajectoryLength = balloonsWithDistance > 0 ? 
             totalDistance / balloonsWithDistance : 0;
         
+        console.log(`Total distance: ${totalDistance}, Balloons with distance: ${balloonsWithDistance}`);
+        console.log(`Average trajectory length: ${avgTrajectoryLength.toFixed(1)}`);
+        
         document.getElementById('avg-trajectory-length').textContent = 
-            avgTrajectoryLength.toFixed(1);
+            avgTrajectoryLength > 0 ? avgTrajectoryLength.toFixed(1) : '-';
         
         // Find maximum speed
         let maxSpeed = 0;
+        let validSpeedCount = 0;
         
         balloonData.balloons.forEach(balloon => {
-            if (balloon.max_speed && balloon.max_speed > maxSpeed) {
-                maxSpeed = balloon.max_speed;
+            if (balloon.max_speed !== undefined && balloon.max_speed !== null && !isNaN(balloon.max_speed)) {
+                maxSpeed = Math.max(maxSpeed, balloon.max_speed);
+                validSpeedCount++;
+                console.log(`Balloon ${balloon.id} speed: ${balloon.max_speed}`);
             }
         });
         
-        document.getElementById('max-speed').textContent = maxSpeed.toFixed(1);
+        console.log(`Max speed found: ${maxSpeed}, Valid speed count: ${validSpeedCount}`);
+        
+        document.getElementById('max-speed').textContent = 
+            maxSpeed > 0 ? maxSpeed.toFixed(1) : '-';
         
         // Calculate altitude range
         let minAltitude = Number.MAX_VALUE;
         let maxAltitude = 0;
+        let validAltitudeCount = 0;
         
         balloonData.balloons.forEach(balloon => {
-            if (balloon.latest && balloon.latest.alt !== undefined) {
-                minAltitude = Math.min(minAltitude, balloon.latest.alt);
-                maxAltitude = Math.max(maxAltitude, balloon.latest.alt);
+            if (balloon.latest && balloon.latest.alt !== undefined && 
+                !isNaN(balloon.latest.alt) && balloon.latest.alt !== null) {
+                const alt = parseFloat(balloon.latest.alt);
+                minAltitude = Math.min(minAltitude, alt);
+                maxAltitude = Math.max(maxAltitude, alt);
+                validAltitudeCount++;
+                console.log(`Balloon ${balloon.id} altitude: ${alt}`);
             }
         });
         
-        if (minAltitude !== Number.MAX_VALUE) {
+        console.log(`Altitude range: ${minAltitude}-${maxAltitude}, Valid altitude count: ${validAltitudeCount}`);
+        
+        if (validAltitudeCount > 0 && minAltitude !== Number.MAX_VALUE) {
             document.getElementById('altitude-range').textContent = 
                 `${Math.round(minAltitude).toLocaleString()}-${Math.round(maxAltitude).toLocaleString()}`;
         } else {
@@ -308,34 +330,69 @@
         }
         
         // Show cluster count
-        const clusterCount = balloonData.clusters ? Object.keys(balloonData.clusters).length : 0;
+        const clusterCount = balloonData.clusters ? balloonData.clusters.length : 0;
+        console.log(`Cluster count: ${clusterCount}`);
         document.getElementById('cluster-count').textContent = clusterCount;
     }
     
     // Function to update altitude vs speed chart
     function updateAltitudeSpeedChart() {
-        if (!balloonData || !balloonData.balloons || balloonData.balloons.length === 0) return;
+        if (!balloonData || !balloonData.balloons || balloonData.balloons.length === 0) {
+            console.log('No balloon data available for altitude-speed chart');
+            return;
+        }
+        
+        console.log('Updating altitude vs speed chart with', balloonData.balloons.length, 'balloons');
         
         // Prepare data
         const dataPoints = [];
+        let validPointCount = 0;
         
         balloonData.balloons.forEach(balloon => {
-            // Skip if missing required data
-            if (!balloon.latest || balloon.latest.alt === undefined || !balloon.avg_speed) return;
+            // Log the balloon data to debug
+            console.log(`Processing balloon ${balloon.id} for altitude-speed chart:`, 
+                    `altitude: ${balloon.latest?.alt}, speed: ${balloon.avg_speed}`);
+            
+            // Skip if missing required data or not numeric
+            if (!balloon.latest || balloon.latest.alt === undefined || 
+                balloon.avg_speed === undefined || 
+                isNaN(parseFloat(balloon.latest.alt)) || 
+                isNaN(parseFloat(balloon.avg_speed))) {
+                console.log(`Skipping balloon ${balloon.id} due to missing or invalid data`);
+                return;
+            }
             
             // Skip if outside the selected time range
             if (balloon.latest.timestamp && 
-                (Date.now() / 1000 - balloon.latest.timestamp) > selectedTimeFilter * 3600) return;
+                (Date.now() / 1000 - balloon.latest.timestamp) > selectedTimeFilter * 3600) {
+                console.log(`Skipping balloon ${balloon.id} due to time filter`);
+                return;
+            }
             
+            // Convert to numbers to ensure proper handling
+            const altitude = parseFloat(balloon.latest.alt);
+            const speed = parseFloat(balloon.avg_speed);
+            
+            // Double check for valid numeric values
+            if (!isFinite(altitude) || !isFinite(speed)) {
+                console.log(`Skipping balloon ${balloon.id} due to non-finite values`);
+                return;
+            }
+            
+            validPointCount++;
             dataPoints.push({
-                x: balloon.latest.alt,  // altitude
-                y: balloon.avg_speed,   // speed
+                x: altitude,  // altitude
+                y: speed,     // speed
                 r: 5 + (balloon.history_points || 1) / 2,  // bubble size based on data points
                 id: balloon.id,
                 lat: balloon.latest.lat,
                 lon: balloon.latest.lon
             });
+            
+            console.log(`Added data point for balloon ${balloon.id}: altitude=${altitude}, speed=${speed}`);
         });
+        
+        console.log(`Generated ${validPointCount} valid data points for altitude-speed chart`);
         
         // Create or update chart
         const ctx = document.getElementById('altitude-speed-chart').getContext('2d');
@@ -343,7 +400,9 @@
         if (altitudeSpeedChart) {
             altitudeSpeedChart.data.datasets[0].data = dataPoints;
             altitudeSpeedChart.update();
+            console.log('Updated existing altitude-speed chart');
         } else {
+            console.log('Creating new altitude-speed chart');
             altitudeSpeedChart = new Chart(ctx, {
                 type: 'bubble',
                 data: {
@@ -457,18 +516,46 @@
     
     // Function to update speed distribution chart
     function updateSpeedChart() {
-        if (!balloonData || !balloonData.balloons || balloonData.balloons.length === 0) return;
+        if (!balloonData || !balloonData.balloons || balloonData.balloons.length === 0) {
+            console.log('No balloon data available for speed chart');
+            return;
+        }
+        
+        console.log('Updating speed chart with', balloonData.balloons.length, 'balloons');
         
         // Collect speed data
         const speeds = [];
         
         balloonData.balloons.forEach(balloon => {
-            if (balloon.avg_speed) {
-                speeds.push(balloon.avg_speed);
+            if (balloon.avg_speed !== undefined && balloon.avg_speed !== null && 
+                !isNaN(parseFloat(balloon.avg_speed))) {
+                const speed = parseFloat(balloon.avg_speed);
+                speeds.push(speed);
+                console.log(`Balloon ${balloon.id} speed: ${speed}`);
             }
         });
         
-        if (speeds.length === 0) return;
+        console.log(`Found ${speeds.length} balloons with valid speed data`);
+        
+        if (speeds.length === 0) {
+            // If we have wind patterns data, use that as fallback
+            if (balloonData.wind_patterns) {
+                console.log('No speed data from balloons, using wind patterns');
+                
+                for (const [altitude, data] of Object.entries(balloonData.wind_patterns)) {
+                    if (data && data.avg_speed !== undefined && !isNaN(parseFloat(data.avg_speed))) {
+                        const speed = parseFloat(data.avg_speed);
+                        speeds.push(speed);
+                        console.log(`Added speed ${speed} from ${altitude} wind pattern`);
+                    }
+                }
+            }
+        }
+        
+        if (speeds.length === 0) {
+            console.log('No valid speed data found for speed chart');
+            return;
+        }
         
         // Create speed ranges
         const speedRanges = {
@@ -493,13 +580,17 @@
             }
         });
         
+        console.log('Speed ranges:', speedRanges);
+        
         // Create or update chart
         const ctx = document.getElementById('speed-chart').getContext('2d');
         
         if (speedChart) {
             speedChart.data.datasets[0].data = Object.values(speedRanges);
             speedChart.update();
+            console.log('Updated existing speed chart');
         } else {
+            console.log('Creating new speed chart');
             speedChart = new Chart(ctx, {
                 type: 'bar',
                 data: {

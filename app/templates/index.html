@@ -351,6 +351,7 @@
     }
     
     // Function to update altitude chart
+
     function updateAltitudeChart(data) {
         const ctx = document.getElementById('altitude-chart').getContext('2d');
         
@@ -363,25 +364,42 @@
             '20km+': 0
         };
         
+        // Debug: Log altitude data before processing
+        console.log('Processing altitude data for chart...');
+        
         // Count balloons in each altitude range
         if (data.balloons && data.balloons.length > 0) {
+            let altitudeCount = 0;
+            
             data.balloons.forEach(balloon => {
                 if (balloon.latest && balloon.latest.alt !== undefined) {
-                    const altitude = balloon.latest.alt;
+                    const altitude = parseFloat(balloon.latest.alt);
                     
-                    if (altitude < 5000) {
-                        altitudeRanges['0-5km']++;
-                    } else if (altitude < 10000) {
-                        altitudeRanges['5-10km']++;
-                    } else if (altitude < 15000) {
-                        altitudeRanges['10-15km']++;
-                    } else if (altitude < 20000) {
-                        altitudeRanges['15-20km']++;
-                    } else {
-                        altitudeRanges['20km+']++;
+                    // Debug log for altitude values
+                    console.log(`Balloon ${balloon.id} altitude: ${altitude}`);
+                    
+                    // Explicitly handle altitude as meters (the 3rd value in the API array)
+                    // Check for NaN and invalid values
+                    if (!isNaN(altitude) && isFinite(altitude)) {
+                        altitudeCount++;
+                        
+                        if (altitude < 5000) {
+                            altitudeRanges['0-5km']++;
+                        } else if (altitude < 10000) {
+                            altitudeRanges['5-10km']++;
+                        } else if (altitude < 15000) {
+                            altitudeRanges['10-15km']++;
+                        } else if (altitude < 20000) {
+                            altitudeRanges['15-20km']++;
+                        } else {
+                            altitudeRanges['20km+']++;
+                        }
                     }
                 }
             });
+            
+            console.log(`Processed ${altitudeCount} balloons with valid altitude data`);
+            console.log('Altitude ranges count:', altitudeRanges);
         }
         
         // Check if chart already exists and destroy it

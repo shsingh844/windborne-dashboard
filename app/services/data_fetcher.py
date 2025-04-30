@@ -255,23 +255,31 @@ class DataFetcher:
         
     def get_balloon_history(self, all_hours_data: Dict[int, Dict]) -> Dict[str, Any]:
         """
-        Extract the history of each balloon across all hours.
+        Extract the history of each balloon across all hours using coordinate proximity.
         
         Args:
             all_hours_data: Dictionary mapping hour to hour data
-            
+                
         Returns:
             Dictionary mapping balloon ID to its history
         """
-        balloon_history = {}
+        # Create a structure to track active balloons
+        # Each active balloon will have: id, position, and history
+        active_balloons = []
+        
+        # Error tracking
         error_records = []
         valid_hours_count = 0
         
         # Debug: Log overall data received
         logger.info(f"Processing data from {len(all_hours_data)} hours")
         
-        # Process each hour of data
-        for hour, hour_data in sorted(all_hours_data.items()):
+        # First, sort hours to process them in chronological order (oldest first)
+        sorted_hours = sorted(all_hours_data.keys())
+        
+        for hour in sorted_hours:
+            hour_data = all_hours_data[hour]
+            
             # Check if this is an error record
             if 'error' in hour_data:
                 error_record = {
@@ -289,36 +297,122 @@ class DataFetcher:
                 continue
                 
             valid_hours_count += 1
-            balloons_count = len(hour_data['balloons'])
+            balloons_in_hour = hour_data['balloons']
+            balloons_count = len(balloons_in_hour)
+            
             logger.info(f"Processing hour {hour} with {balloons_count} balloons")
             
-            # Processing balloons from this hour
-            for balloon in hour_data['balloons']:
-                # Skip if no required position data
-                if 'lat' not in balloon or 'lon' not in balloon:
-                    logger.warning(f"Skipping balloon in hour {hour} due to missing required fields. Fields: {list(balloon.keys())}")
+            # Create timestamp for this hour
+            current_timestamp = int(time.time()) - (hour * 3600)
+            
+            # First hour is special - all balloons are new
+            if len(active_balloons) == 0:
+                for i, balloon in enumerate(balloons_in_hour):
+                    # Skip if missing required position data
+                    if 'lat' not in balloon or 'lon' not in balloon:
+                        continue
+                    
+                    # Create a new balloon entry with a simple ID format
+                    balloon_id = f"balloon_{i:04d}"
+                    
+                    # Add timestamp
+                    balloon_with_time = balloon.copy()
+                    balloon_with_time['timestamp'] = current_timestamp
+                    
+                    # Add to active balloons
+                    active_balloons.append({
+                        'id': balloon_id,
+                        'position': (balloon['lat'], balloon['lon'], balloon.get('alt', 0)),
+                        'history': [balloon_with_time]
+                    })
+                
+                logger.info(f"Initialized {len(active_balloons)} balloons in first hour")
+                continue
+            
+            # For subsequent hours, try to match balloons based on proximity
+            # Keep track of which balloons from this hour have been matched
+            matched_balloons = set()
+            
+            # For each active balloon, try to find its new position
+            for active_balloon in active_balloons:
+                # Get the last known position
+                last_pos = active_balloon['position']
+                
+                # Find the closest balloon in current hour
+                closest_idx = -1
+                closest_dist = float('inf')
+                
+                for i, balloon in enumerate(balloons_in_hour):
+                    # Skip if already matched or missing coordinates
+                    if i in matched_balloons or 'lat' not in balloon or 'lon' not in balloon:
+                        continue
+                    
+                    # Calculate distance to previous position
+                    current_pos = (balloon['lat'], balloon['lon'], balloon.get('alt', 0))
+                    
+                    # Calculate 3D distance (including altitude if available)
+                    dist = self._calculate_3d_distance(
+                        last_pos[0], last_pos[1], last_pos[2],
+                        current_pos[0], current_pos[1], current_pos[2]
+                    )
+                    
+                    # Define a maximum reasonable distance a balloon could move in an hour
+                    # This would depend on expected balloon speeds - adjust as needed
+                    MAX_DISTANCE_KM = 150  # 150 km max movement in an hour
+                    
+                    if dist < closest_dist and dist < MAX_DISTANCE_KM:
+                        closest_dist = dist
+                        closest_idx = i
+                
+                # If we found a match, update the balloon's history
+                if closest_idx >= 0:
+                    matched_balloon = balloons_in_hour[closest_idx]
+                    
+                    # Add timestamp
+                    balloon_with_time = matched_balloon.copy()
+                    balloon_with_time['timestamp'] = current_timestamp
+                    
+                    # Update position and add to history
+                    active_balloon['position'] = (
+                        matched_balloon['lat'], 
+                        matched_balloon['lon'], 
+                        matched_balloon.get('alt', 0)
+                    )
+                    active_balloon['history'].append(balloon_with_time)
+                    
+                    # Mark as matched
+                    matched_balloons.add(closest_idx)
+                    
+                    logger.debug(f"Matched balloon {active_balloon['id']} with new position, distance: {closest_dist:.2f} km")
+            
+            # Any unmatched balloons in this hour are new balloons
+            for i, balloon in enumerate(balloons_in_hour):
+                if i in matched_balloons or 'lat' not in balloon or 'lon' not in balloon:
                     continue
                 
-                # Get or generate balloon ID
-                if 'id' not in balloon:
-                    # For balloons without IDs, generate a consistent ID based on coordinates
-                    lat = balloon['lat']
-                    lon = balloon['lon']
-                    alt = balloon.get('alt', 0)
-                    balloon_id = f"balloon_{hour:02d}_{lat:.5f}_{lon:.5f}_{alt:.5f}"
-                else:
-                    balloon_id = str(balloon['id'])
+                # Generate a new ID
+                balloon_id = f"balloon_{len(active_balloons):04d}"
                 
-                # Add timestamp field based on hour
+                # Add timestamp
                 balloon_with_time = balloon.copy()
-                # Current time minus hours in seconds
-                balloon_with_time['timestamp'] = int(time.time()) - (hour * 3600)
+                balloon_with_time['timestamp'] = current_timestamp
                 
-                # Initialize if this is the first time seeing this balloon
-                if balloon_id not in balloon_history:
-                    balloon_history[balloon_id] = []
-                    
-                balloon_history[balloon_id].append(balloon_with_time)
+                # Add as a new active balloon
+                active_balloons.append({
+                    'id': balloon_id,
+                    'position': (balloon['lat'], balloon['lon'], balloon.get('alt', 0)),
+                    'history': [balloon_with_time]
+                })
+                
+                logger.debug(f"Added new balloon {balloon_id}")
+        
+        # Convert active_balloons to the expected return format
+        balloon_history = {}
+        
+        for balloon in active_balloons:
+            # Only include balloons with at least 2 data points
+            if len(balloon['history']) >= 1:
+                balloon_history[balloon['id']] = balloon['history']
         
         # Debug info
         if valid_hours_count == 0:
@@ -333,9 +427,63 @@ class DataFetcher:
             'balloon_history': balloon_history,
             'errors': error_records if error_records else None
         }
-                
-        # Sort each balloon's history by timestamp
-        for balloon_id in balloon_history:
-            balloon_history[balloon_id].sort(key=lambda x: x.get('timestamp', 0))
-            
+        
         return result
+    
+    def _calculate_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """
+        Calculate the great-circle distance between two points using the Haversine formula.
+        
+        Args:
+            lat1: Latitude of first point in degrees
+            lon1: Longitude of first point in degrees
+            lat2: Latitude of second point in degrees
+            lon2: Longitude of second point in degrees
+            
+        Returns:
+            Distance in kilometers
+        """
+        # Earth radius in kilometers
+        earth_radius = 6371.0
+        
+        # Convert to radians
+        lat1_rad = math.radians(lat1)
+        lon1_rad = math.radians(lon1)
+        lat2_rad = math.radians(lat2)
+        lon2_rad = math.radians(lon2)
+        
+        # Haversine formula
+        dlon = lon2_rad - lon1_rad
+        dlat = lat2_rad - lat1_rad
+        a = math.sin(dlat/2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon/2)**2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        distance = earth_radius * c
+        
+        return distance
+
+    def _calculate_3d_distance(self, lat1: float, lon1: float, alt1: float, 
+                            lat2: float, lon2: float, alt2: float) -> float:
+        """
+        Calculate the 3D distance between two points (including altitude).
+        
+        Args:
+            lat1, lon1, alt1: Coordinates of first point (alt in meters)
+            lat2, lon2, alt2: Coordinates of second point (alt in meters)
+            
+        Returns:
+            Distance in kilometers
+        """
+        # First calculate the great-circle distance using Haversine formula
+        surface_distance = self._calculate_distance(lat1, lon1, lat2, lon2)
+        
+        # Convert altitude from meters to kilometers
+        alt1_km = alt1 / 1000.0
+        alt2_km = alt2 / 1000.0
+        
+        # Calculate altitude difference
+        alt_diff = alt2_km - alt1_km
+        
+        # Use Pythagorean theorem to find the 3D distance
+        distance_3d = math.sqrt(surface_distance**2 + alt_diff**2)
+        
+        return distance_3d
