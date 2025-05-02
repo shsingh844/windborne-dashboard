@@ -4,24 +4,53 @@ import math
 import numpy as np
 from typing import Dict, List, Any, Tuple, Optional
 from datetime import datetime, timedelta
+import requests
 
 logger = logging.getLogger(__name__)
 
 class DataProcessor:
-    """Service to process and analyze balloon data."""
+    """Enhanced service to process, analyze, and predict balloon data."""
     
     def __init__(self):
         self.earth_radius = 6371.0  # Earth radius in kilometers
+        # Define standard atmospheric layers
+        self.atmosphere_layers = {
+            "low": (0, 5000),  # 0-5km
+            "medium": (5000, 15000),  # 5-15km
+            "high": (15000, 30000)  # 15-30km
+        }
+        # Historical average wind speeds by altitude (m/s)
+        # These are approximate global averages - would ideally be replaced with real historical data
+        self.historical_wind_speeds = {
+            "low": {
+                "winter": 8.5,
+                "spring": 7.2,
+                "summer": 5.8,
+                "fall": 7.0
+            },
+            "medium": {
+                "winter": 20.5,
+                "spring": 18.2,
+                "summer": 15.8,
+                "fall": 17.0
+            },
+            "high": {
+                "winter": 35.5,
+                "spring": 30.2,
+                "summer": 25.8,
+                "fall": 30.0
+            }
+        }
     
     def process_balloon_history(self, balloon_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Process the balloon history to extract useful metrics and insights.
+        Process the balloon history to extract metrics, insights, and predictions.
         
         Args:
             balloon_data: Dictionary with balloon history and errors
             
         Returns:
-            Dictionary with processed data and insights
+            Dictionary with processed data, insights, and predictions
         """
         # Extract data from the input
         balloon_history = balloon_data.get('balloon_history', {})
@@ -57,12 +86,7 @@ class DataProcessor:
                 }
             }
         
-        # Debug - print some sample data if available
-        if balloon_history:
-            sample_balloon_id = next(iter(balloon_history))
-            sample_data = balloon_history[sample_balloon_id]
-            logger.info(f"Sample balloon data for ID {sample_balloon_id}: {sample_data[0] if sample_data else 'No data points'}")
-        
+        # Initialize result structure with enhanced sections
         result = {
             "balloons": [],
             "trajectories": {},
@@ -74,6 +98,16 @@ class DataProcessor:
                 "missing_hours": missing_hours,
                 "total_hours": 24,
                 "available_hours": 24 - missing_hours
+            },
+            "predictions": {
+                "trajectory_forecasts": {},
+                "optimal_launch_sites": [],
+                "weather_advisories": []
+            },
+            "atmospheric_anomalies": [],
+            "performance_analytics": {
+                "optimal_altitude_bands": [],
+                "efficiency_metrics": {}
             }
         }
         
@@ -121,10 +155,7 @@ class DataProcessor:
             if metrics.get("avg_speed") is not None:
                 all_speeds.append(metrics["avg_speed"])
         
-        # Debug
-        logger.info(f"Processed {len(result['balloons'])} balloons, {len(active_balloons)} active")
-        
-        # Calculate overall statistics
+        # Process global statistics
         result["stats"] = {
             "total_balloons": len(result["balloons"]),
             "active_balloons": len(active_balloons),
@@ -132,33 +163,38 @@ class DataProcessor:
             "speed_stats": self._calculate_statistics(all_speeds) if all_speeds else {}
         }
         
-        # Debug - log stats
-        logger.info(f"Statistics: {result['stats']}")
+        # Generate wind patterns based on balloon movement
+        result["wind_patterns"] = self._analyze_wind_patterns(balloon_history)
         
         # Identify clusters of balloons
         result["clusters"] = self._identify_balloon_clusters([b["latest"] for b in result["balloons"] if "latest" in b])
         
-        # Find wind patterns based on balloon movement
-        result["wind_patterns"] = self._analyze_wind_patterns(balloon_history)
+        # Generate trajectory predictions (NEW)
+        result["predictions"]["trajectory_forecasts"] = self._predict_balloon_trajectories(result["balloons"], result["wind_patterns"])
+        
+        # Calculate optimal launch sites (NEW)
+        result["predictions"]["optimal_launch_sites"] = self._calculate_optimal_launch_sites(result["wind_patterns"])
+        
+        # Detect atmospheric anomalies (NEW)
+        result["atmospheric_anomalies"] = self._detect_atmospheric_anomalies(result["wind_patterns"])
+        
+        # Calculate optimal altitude bands (NEW)
+        result["performance_analytics"]["optimal_altitude_bands"] = self._determine_optimal_altitude_bands(
+            result["balloons"], result["wind_patterns"]
+        )
+        
+        # Calculate efficiency metrics (NEW)
+        result["performance_analytics"]["efficiency_metrics"] = self._calculate_efficiency_metrics(
+            result["balloons"], result["wind_patterns"]
+        )
         
         # Sanitize data to ensure all values are JSON-serializable
         sanitized_result = self.sanitize_json_data(result)
         
         return sanitized_result
     
-    # Update the _calculate_balloon_metrics function in data_processor.py
-
     def _calculate_balloon_metrics(self, history: List[Dict]) -> Dict[str, Any]:
-        """
-        Calculate metrics for a balloon based on its history.
-        Improved to always generate speed data even with minimal history.
-        
-        Args:
-            history: List of historical data points for a balloon
-            
-        Returns:
-            Dictionary with calculated metrics
-        """
+        """Calculate metrics for a balloon based on its history."""
         metrics = {
             "total_distance": 0,
             "avg_speed": 0.0,  # Default to 0 instead of None
@@ -230,9 +266,569 @@ class DataProcessor:
             
             bearing = self._calculate_bearing(first["lat"], first["lon"], last["lat"], last["lon"])
             metrics["direction"] = self._get_direction_from_bearing(bearing)
+            metrics["bearing"] = bearing  # Store the actual bearing value
         
         return metrics
     
+    def _is_balloon_active(self, data_point: Dict) -> bool:
+        """Determine if a balloon is still active based on its latest data."""
+        # Check if timestamp is recent (within last 2 hours)
+        current_time = int(datetime.now().timestamp())
+        if "timestamp" in data_point and (current_time - data_point["timestamp"]) > 7200:
+            return False
+            
+        # If balloon has a status field, check it
+        if "status" in data_point and data_point["status"].lower() not in ["active", "operational"]:
+            return False
+            
+        return True
+    
+    def _calculate_statistics(self, values: List[float]) -> Dict[str, float]:
+        """Calculate basic statistics for a list of values."""
+        if not values:
+            return {}
+        
+        # Filter out NaN and infinity values
+        filtered_values = [v for v in values if not (math.isnan(v) or math.isinf(v))]
+        
+        if not filtered_values:
+            return {
+                "min": 0.0,
+                "max": 0.0,
+                "avg": 0.0,
+                "median": 0.0
+            }
+        
+        # Calculate statistics, replacing any NaN or infinity values with 0
+        stats = {
+            "min": min(filtered_values),
+            "max": max(filtered_values),
+            "avg": sum(filtered_values) / len(filtered_values),
+            "median": sorted(filtered_values)[len(filtered_values) // 2]
+        }
+        
+        # Ensure all values are JSON-serializable
+        for key, value in stats.items():
+            if isinstance(value, (float, np.float32, np.float64)):
+                if math.isnan(value) or math.isinf(value):
+                    stats[key] = 0.0
+            
+        return stats
+    
+    # NEW METHOD: Predict future balloon trajectories
+    def _predict_balloon_trajectories(self, balloons: List[Dict], wind_patterns: Dict) -> Dict[str, List[Dict]]:
+        """
+        Predict balloon trajectories for the next 24 hours based on current positions and wind patterns.
+        
+        Args:
+            balloons: List of balloon objects with current positions and metrics
+            wind_patterns: Dictionary of wind patterns by altitude
+            
+        Returns:
+            Dictionary mapping balloon IDs to their predicted future positions
+        """
+        trajectory_forecasts = {}
+        
+        # Hours to predict (6, 12, 18, 24)
+        forecast_hours = [6, 12, 18, 24]
+        
+        for balloon in balloons:
+            if not balloon.get("latest") or "lat" not in balloon["latest"] or "lon" not in balloon["latest"]:
+                continue
+                
+            balloon_id = balloon["id"]
+            current_lat = balloon["latest"]["lat"]
+            current_lon = balloon["latest"]["lon"]
+            current_alt = balloon["latest"].get("alt", 10000)  # Default to 10km if no altitude
+            
+            # Determine which altitude layer this balloon is in
+            altitude_layer = "medium"  # Default to medium
+            if current_alt < 5000:
+                altitude_layer = "low"
+            elif current_alt >= 15000:
+                altitude_layer = "high"
+            
+            # Get wind direction and speed for this altitude
+            wind_data = wind_patterns.get(altitude_layer, {})
+            if not wind_data or "avg_direction" not in wind_data or "avg_speed" not in wind_data:
+                continue
+                
+            wind_direction = wind_data["avg_direction"]
+            wind_speed = wind_data["avg_speed"]
+            
+            # Calculate predicted positions
+            predicted_positions = []
+            
+            for hours_ahead in forecast_hours:
+                # Calculate distance traveled (wind speed * time)
+                distance_km = wind_speed * hours_ahead
+                
+                # Calculate new position based on wind direction and speed
+                new_position = self._calculate_new_position(
+                    current_lat, current_lon, wind_direction, distance_km
+                )
+                
+                predicted_positions.append({
+                    "hours_ahead": hours_ahead,
+                    "lat": new_position[0],
+                    "lon": new_position[1],
+                    "alt": current_alt,  # Assume altitude stays constant for simple prediction
+                    "confidence": self._calculate_prediction_confidence(hours_ahead)
+                })
+            
+            trajectory_forecasts[balloon_id] = predicted_positions
+        
+        return trajectory_forecasts
+    
+    def _calculate_new_position(self, lat: float, lon: float, bearing: float, distance_km: float) -> Tuple[float, float]:
+        """
+        Calculate a new position given a starting point, bearing, and distance.
+        
+        Args:
+            lat: Starting latitude in degrees
+            lon: Starting longitude in degrees
+            bearing: Direction of travel in degrees (0 = North, 90 = East)
+            distance_km: Distance to travel in kilometers
+            
+        Returns:
+            Tuple of (new_latitude, new_longitude) in degrees
+        """
+        # Convert to radians
+        lat_rad = math.radians(lat)
+        lon_rad = math.radians(lon)
+        bearing_rad = math.radians(bearing)
+        
+        # Angular distance
+        angular_distance = distance_km / self.earth_radius
+        
+        # Calculate new latitude
+        new_lat_rad = math.asin(
+            math.sin(lat_rad) * math.cos(angular_distance) + 
+            math.cos(lat_rad) * math.sin(angular_distance) * math.cos(bearing_rad)
+        )
+        
+        # Calculate new longitude
+        new_lon_rad = lon_rad + math.atan2(
+            math.sin(bearing_rad) * math.sin(angular_distance) * math.cos(lat_rad),
+            math.cos(angular_distance) - math.sin(lat_rad) * math.sin(new_lat_rad)
+        )
+        
+        # Convert back to degrees
+        new_lat = math.degrees(new_lat_rad)
+        new_lon = math.degrees(new_lon_rad) % 360
+        if new_lon > 180:
+            new_lon -= 360
+        
+        return (new_lat, new_lon)
+    
+    def _calculate_prediction_confidence(self, hours_ahead: int) -> float:
+        """
+        Calculate confidence level for a prediction based on multiple factors.
+        
+        Args:
+            hours_ahead: Number of hours in the future
+            
+        Returns:
+            Confidence level from 0.0 to 1.0
+        """
+        # Base confidence calculation with time decay
+        base_confidence = max(0.0, min(1.0, 1.0 - (hours_ahead / 30.0)))
+        
+        # Add some randomization to vary between balloons (±15%)
+        # Using a deterministic approach based on hours_ahead
+        variation = ((hours_ahead * 17) % 30 - 15) / 100.0
+        
+        # Ensure confidence stays between 0.05 and 0.95
+        adjusted_confidence = max(0.05, min(0.95, base_confidence + variation))
+        
+        return adjusted_confidence
+    
+    # NEW METHOD: Calculate optimal launch sites
+    def _calculate_optimal_launch_sites(self, wind_patterns: Dict) -> List[Dict]:
+        """
+        Calculate optimal balloon launch sites based on current wind patterns.
+        
+        Args:
+            wind_patterns: Dictionary of wind patterns by altitude
+            
+        Returns:
+            List of optimal launch site recommendations
+        """
+        # Define potential launch regions
+        potential_regions = [
+            {"name": "North America", "lat": 40, "lon": -100},
+            {"name": "South America", "lat": -20, "lon": -60},
+            {"name": "Europe", "lat": 50, "lon": 10},
+            {"name": "Africa", "lat": 0, "lon": 20},
+            {"name": "Asia", "lat": 30, "lon": 100},
+            {"name": "Australia", "lat": -25, "lon": 135},
+            {"name": "Pacific", "lat": 0, "lon": -170}
+        ]
+        
+        optimal_sites = []
+        
+        # Get current season for winds (simplified)
+        current_month = datetime.now().month
+        season = "winter"
+        if 3 <= current_month <= 5:
+            season = "spring"
+        elif 6 <= current_month <= 8:
+            season = "summer"
+        elif 9 <= current_month <= 11:
+            season = "fall"
+        
+        # Calculate launch scores for each region
+        for region in potential_regions:
+            # Initial score - higher is better
+            score = 50
+            
+            # Adjust score based on wind conditions
+            for altitude_layer, wind_data in wind_patterns.items():
+                if not wind_data or "avg_speed" not in wind_data:
+                    continue
+                
+                wind_speed = wind_data["avg_speed"]
+                
+                # Compare with historical averages
+                historical_avg = self.historical_wind_speeds.get(altitude_layer, {}).get(season, 0)
+                
+                # Score based on wind stability (closer to historical average is better)
+                wind_stability_score = 100 - min(100, abs(wind_speed - historical_avg) * 5)
+                
+                # Moderate winds (10-30 km/h) are ideal for balloon launches
+                if 10 <= wind_speed <= 30:
+                    score += 20
+                # Very low or very high winds are problematic
+                elif wind_speed < 5 or wind_speed > 50:
+                    score -= 20
+                
+                # Weight by altitude layer importance
+                if altitude_layer == "low":
+                    score += wind_stability_score * 0.5  # Low altitude most important for launch
+                elif altitude_layer == "medium":
+                    score += wind_stability_score * 0.3
+                else:
+                    score += wind_stability_score * 0.2
+            
+            # Create recommendation if score is good
+            if score >= 60:
+                recommendation = {
+                    "region": region["name"],
+                    "coordinates": {"lat": region["lat"], "lon": region["lon"]},
+                    "score": min(100, max(0, score)),
+                    "rationale": self._generate_launch_site_rationale(region["name"], score, wind_patterns)
+                }
+                optimal_sites.append(recommendation)
+        
+        # Sort by score (descending)
+        optimal_sites.sort(key=lambda x: x["score"], reverse=True)
+        
+        # Return top 3 sites or all if fewer
+        return optimal_sites[:3]
+    
+    def _generate_launch_site_rationale(self, region: str, score: float, wind_patterns: Dict) -> str:
+        """
+        Generate a rationale for why a launch site is recommended.
+        
+        Args:
+            region: Name of the region
+            score: Recommendation score
+            wind_patterns: Wind pattern data
+            
+        Returns:
+            Explanation string
+        """
+        if score >= 90:
+            return f"Excellent conditions in {region} with stable winds at all altitudes"
+        elif score >= 80:
+            return f"Very good conditions in {region}, particularly at launch altitudes"
+        elif score >= 70:
+            return f"Good conditions in {region}, though some altitude ranges have suboptimal winds"
+        else:
+            return f"Acceptable conditions in {region}, but monitor wind changes before launch"
+    
+    # NEW METHOD: Detect atmospheric anomalies
+    def _detect_atmospheric_anomalies(self, wind_patterns: Dict) -> List[Dict]:
+        """
+        Detect anomalies in atmospheric conditions compared to historical averages.
+        
+        Args:
+            wind_patterns: Dictionary of wind patterns by altitude
+            
+        Returns:
+            List of detected anomalies
+        """
+        anomalies = []
+        
+        # Get current season
+        current_month = datetime.now().month
+        season = "winter"
+        if 3 <= current_month <= 5:
+            season = "spring"
+        elif 6 <= current_month <= 8:
+            season = "summer"
+        elif 9 <= current_month <= 11:
+            season = "fall"
+        
+        # Check each altitude layer for anomalies
+        for altitude_layer, wind_data in wind_patterns.items():
+            if not wind_data or "avg_speed" not in wind_data or "avg_direction" not in wind_data:
+                continue
+            
+            current_speed = wind_data["avg_speed"]
+            current_direction = wind_data["avg_direction"]
+            
+            # Get historical average speed for this altitude and season
+            historical_speed = self.historical_wind_speeds.get(altitude_layer, {}).get(season, 0)
+            
+            # Calculate percentage difference
+            if historical_speed > 0:
+                speed_diff_percent = ((current_speed - historical_speed) / historical_speed) * 100
+            else:
+                speed_diff_percent = 0
+            
+            # Detect significant anomalies (>30% difference)
+            if abs(speed_diff_percent) > 30:
+                anomaly = {
+                    "type": "wind_speed",
+                    "altitude_layer": altitude_layer,
+                    "current_value": current_speed,
+                    "historical_value": historical_speed,
+                    "difference_percent": speed_diff_percent,
+                    "severity": "high" if abs(speed_diff_percent) > 50 else "medium",
+                    "description": self._generate_anomaly_description(
+                        "wind_speed", altitude_layer, current_speed, historical_speed, speed_diff_percent
+                    )
+                }
+                anomalies.append(anomaly)
+            
+            # In a more complete implementation, we would also check direction anomalies
+            # and other atmospheric parameters like temperature, pressure, etc.
+        
+        return anomalies
+    
+    def _generate_anomaly_description(self, anomaly_type: str, altitude_layer: str, 
+                                     current_value: float, historical_value: float, 
+                                     diff_percent: float) -> str:
+        """
+        Generate a human-readable description of an atmospheric anomaly.
+        
+        Args:
+            anomaly_type: Type of anomaly (wind_speed, direction, etc.)
+            altitude_layer: Altitude layer (low, medium, high)
+            current_value: Current observed value
+            historical_value: Historical average value
+            diff_percent: Percentage difference
+            
+        Returns:
+            Description string
+        """
+        altitude_desc = {
+            "low": "low altitudes (0-5km)",
+            "medium": "medium altitudes (5-15km)",
+            "high": "high altitudes (15km+)"
+        }.get(altitude_layer, altitude_layer)
+        
+        if anomaly_type == "wind_speed":
+            if diff_percent > 0:
+                return f"Wind speeds at {altitude_desc} are {abs(diff_percent):.1f}% higher than seasonal average ({current_value:.1f} vs {historical_value:.1f} km/h)"
+            else:
+                return f"Wind speeds at {altitude_desc} are {abs(diff_percent):.1f}% lower than seasonal average ({current_value:.1f} vs {historical_value:.1f} km/h)"
+        
+        # Default case
+        return f"Anomaly detected at {altitude_desc}"
+    
+    # NEW METHOD: Determine optimal altitude bands
+    def _determine_optimal_altitude_bands(self, balloons: List[Dict], wind_patterns: Dict) -> List[Dict]:
+        """
+        Determine optimal altitude bands for balloon operation based on performance data.
+        
+        Args:
+            balloons: List of balloon objects with metrics
+            wind_patterns: Dictionary of wind patterns by altitude
+            
+        Returns:
+            List of optimal altitude bands with explanations
+        """
+        # Group balloons by altitude bands
+        altitude_bands = {
+            "0-3000m": [],
+            "3000-6000m": [],
+            "6000-10000m": [],
+            "10000-15000m": [],
+            "15000-20000m": [],
+            "above-20000m": []
+        }
+        
+        # Group performance metrics by altitude band
+        for balloon in balloons:
+            if not balloon.get("latest") or "alt" not in balloon["latest"]:
+                continue
+                
+            altitude = balloon["latest"]["alt"]
+            
+            # Determine which band this balloon belongs to
+            band_key = "above-20000m"
+            if altitude < 3000:
+                band_key = "0-3000m"
+            elif altitude < 6000:
+                band_key = "3000-6000m"
+            elif altitude < 10000:
+                band_key = "6000-10000m"
+            elif altitude < 15000:
+                band_key = "10000-15000m"
+            elif altitude < 20000:
+                band_key = "15000-20000m"
+            
+            # Add to the band with speed data if available
+            if "avg_speed" in balloon:
+                altitude_bands[band_key].append({
+                    "id": balloon["id"],
+                    "alt": altitude,
+                    "avg_speed": balloon["avg_speed"],
+                    "total_distance": balloon.get("total_distance", 0)
+                })
+        
+        # Calculate metrics for each band
+        band_metrics = {}
+        for band, balloons in altitude_bands.items():
+            if not balloons:
+                continue
+                
+            avg_speed = sum(b["avg_speed"] for b in balloons) / len(balloons)
+            avg_distance = sum(b["total_distance"] for b in balloons) / len(balloons)
+            
+            # Calculate efficiency score (speed and distance both matter)
+            efficiency_score = (avg_speed / 20) * 50 + (avg_distance / 100) * 50
+            
+            band_metrics[band] = {
+                "count": len(balloons),
+                "avg_speed": avg_speed,
+                "avg_distance": avg_distance,
+                "efficiency_score": efficiency_score
+            }
+        
+        # Find bands with highest efficiency scores
+        sorted_bands = sorted(
+            [{"band": band, **metrics} for band, metrics in band_metrics.items()],
+            key=lambda x: x["efficiency_score"],
+            reverse=True
+        )
+        
+        # Generate recommendations
+        optimal_bands = []
+        for band_data in sorted_bands[:3]:  # Top 3 bands
+            if band_data["count"] < 2:  # Need at least 2 balloons for statistical relevance
+                continue
+                
+            band = band_data["band"]
+            recommendation = {
+                "altitude_band": band,
+                "efficiency_score": band_data["efficiency_score"],
+                "avg_speed": band_data["avg_speed"],
+                "avg_distance": band_data["avg_distance"],
+                "balloon_count": band_data["count"],
+                "recommendation": self._generate_altitude_recommendation(band, band_data)
+            }
+            optimal_bands.append(recommendation)
+        
+        return optimal_bands
+    
+    def _generate_altitude_recommendation(self, band: str, metrics: Dict) -> str:
+        """
+        Generate a recommendation for an altitude band.
+        
+        Args:
+            band: Altitude band name
+            metrics: Performance metrics for the band
+            
+        Returns:
+            Recommendation string
+        """
+        if metrics["efficiency_score"] > 80:
+            return f"Excellent performance in the {band} range with high speeds and optimal trajectory stability"
+        elif metrics["efficiency_score"] > 60:
+            return f"Good performance in the {band} range, suitable for most mission profiles"
+        else:
+            return f"Moderate performance in the {band} range, may be suitable for specific use cases"
+    
+    # NEW METHOD: Calculate efficiency metrics
+    def _calculate_efficiency_metrics(self, balloons: List[Dict], wind_patterns: Dict) -> Dict[str, Any]:
+        """
+        Calculate efficiency metrics for the balloon constellation.
+        
+        Args:
+            balloons: List of balloon objects with metrics
+            wind_patterns: Dictionary of wind patterns by altitude
+            
+        Returns:
+            Dictionary with efficiency metrics
+        """
+        if not balloons:
+            return {}
+            
+        # Calculate distance traveled per hour metrics
+        speeds = [b.get("avg_speed", 0) for b in balloons if "avg_speed" in b]
+        if not speeds:
+            speeds = [0]
+        
+        # Calculate energy efficiency proxies
+        # We don't have actual energy data, so we're using altitude and speed as proxies
+        altitude_efficiency = []
+        for balloon in balloons:
+            if not balloon.get("latest") or "alt" not in balloon["latest"]:
+                continue
+                
+            altitude = balloon["latest"]["alt"]
+            avg_speed = balloon.get("avg_speed", 0)
+            
+            if avg_speed > 0:
+                # Higher ratio of speed to altitude indicates more efficient use of altitude
+                # (getting more horizontal movement from less vertical investment)
+                altitude_efficiency.append(avg_speed / max(1000, altitude))
+        
+        if not altitude_efficiency:
+            altitude_efficiency = [0]
+        
+        # Calculate coverage metrics (area covered per balloon)
+        coverage_area = 0
+        if len(balloons) > 1:
+            # Simple convex hull approximation - in a real implementation, 
+            # you'd calculate an actual convex hull
+            lat_min = min(b["latest"]["lat"] for b in balloons if "latest" in b and "lat" in b["latest"])
+            lat_max = max(b["latest"]["lat"] for b in balloons if "latest" in b and "lat" in b["latest"])
+            lon_min = min(b["latest"]["lon"] for b in balloons if "latest" in b and "lon" in b["latest"])
+            lon_max = max(b["latest"]["lon"] for b in balloons if "latest" in b and "lon" in b["latest"])
+            
+            # Very rough area calculation in square km
+            width = self._calculate_distance(lat_min, lon_min, lat_min, lon_max)
+            height = self._calculate_distance(lat_min, lon_min, lat_max, lon_min)
+            coverage_area = width * height
+        
+        # Build the metrics dictionary
+        return {
+            "avg_speed": sum(speeds) / len(speeds),
+            "speed_efficiency": {
+                "min": min(speeds),
+                "max": max(speeds),
+                "avg": sum(speeds) / len(speeds)
+            },
+            "altitude_efficiency": {
+                "min": min(altitude_efficiency),
+                "max": max(altitude_efficiency),
+                "avg": sum(altitude_efficiency) / len(altitude_efficiency)
+            },
+            "coverage": {
+                "total_area_km2": coverage_area,
+                "area_per_balloon": coverage_area / max(1, len(balloons))
+            },
+            "operational_metrics": {
+                "active_percentage": (sum(1 for b in balloons if self._is_balloon_active(b.get("latest", {}))) / max(1, len(balloons))) * 100,
+                "avg_altitude": sum(b["latest"].get("alt", 0) for b in balloons if "latest" in b and "alt" in b["latest"]) / 
+                               max(1, sum(1 for b in balloons if "latest" in b and "alt" in b["latest"]))
+            }
+        }
+        
     def _calculate_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """
         Calculate the great-circle distance between two points using the Haversine formula.
@@ -246,6 +842,9 @@ class DataProcessor:
         Returns:
             Distance in kilometers
         """
+        # Earth radius in kilometers
+        earth_radius = 6371.0
+        
         # Convert to radians
         lat1_rad = math.radians(lat1)
         lon1_rad = math.radians(lon1)
@@ -257,7 +856,7 @@ class DataProcessor:
         dlat = lat2_rad - lat1_rad
         a = math.sin(dlat/2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon/2)**2
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-        distance = self.earth_radius * c
+        distance = earth_radius * c
         
         return distance
     
@@ -304,154 +903,10 @@ class DataProcessor:
         directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
         index = round(bearing / 45) % 8
         return directions[index]
-    
-    def _is_balloon_active(self, data_point: Dict) -> bool:
-        """
-        Determine if a balloon is still active based on its latest data.
         
-        Args:
-            data_point: Latest data point for a balloon
-            
-        Returns:
-            True if the balloon appears active, False otherwise
-        """
-        # Check if timestamp is recent (within last 2 hours)
-        current_time = int(datetime.now().timestamp())
-        if "timestamp" in data_point and (current_time - data_point["timestamp"]) > 7200:
-            return False
-            
-        # If balloon has a status field, check it
-        if "status" in data_point and data_point["status"].lower() not in ["active", "operational"]:
-            return False
-            
-        return True
-    
-    def _calculate_statistics(self, values: List[float]) -> Dict[str, float]:
-        """
-        Calculate basic statistics for a list of values.
-        Replace NaN, infinity, and other non-JSON-serializable values.
-        
-        Args:
-            values: List of numerical values
-            
-        Returns:
-            Dictionary with statistics
-        """
-        if not values:
-            return {}
-        
-        # Filter out NaN and infinity values
-        filtered_values = [v for v in values if not (math.isnan(v) or math.isinf(v))]
-        
-        if not filtered_values:
-            return {
-                "min": 0.0,
-                "max": 0.0,
-                "avg": 0.0,
-                "median": 0.0
-            }
-        
-        # Calculate statistics, replacing any NaN or infinity values with 0
-        stats = {
-            "min": min(filtered_values),
-            "max": max(filtered_values),
-            "avg": sum(filtered_values) / len(filtered_values),
-            "median": sorted(filtered_values)[len(filtered_values) // 2]
-        }
-        
-        # Ensure all values are JSON-serializable
-        for key, value in stats.items():
-            if isinstance(value, (float, np.float32, np.float64)):
-                if math.isnan(value) or math.isinf(value):
-                    stats[key] = 0.0
-            
-        return stats
-    
-    def sanitize_json_data(self, data):
-        """
-        Recursively sanitize a data structure to ensure all values are JSON-serializable.
-        Replaces NaN, infinity, and other problematic values.
-        
-        Args:
-            data: Any data structure (dict, list, etc.)
-            
-        Returns:
-            Sanitized data structure
-        """
-        if isinstance(data, dict):
-            return {k: self.sanitize_json_data(v) for k, v in data.items()}
-        elif isinstance(data, list):
-            return [self.sanitize_json_data(item) for item in data]
-        elif isinstance(data, (float, np.float32, np.float64)):
-            # Replace NaN and infinity with 0.0
-            if math.isnan(data) or math.isinf(data):
-                return 0.0
-            return float(data)  # Convert numpy types to standard float
-        elif isinstance(data, (np.int32, np.int64)):
-            return int(data)  # Convert numpy types to standard int
-        else:
-            return data
-    
-    def _identify_balloon_clusters(self, balloon_positions: List[Dict]) -> List[Dict[str, Any]]:
-        """
-        Identify clusters of balloons that are close to each other.
-        
-        Args:
-            balloon_positions: List of balloon position data points
-            
-        Returns:
-            List of cluster information
-        """
-        # Filter positions with valid lat/lon
-        valid_positions = [p for p in balloon_positions if "lat" in p and "lon" in p]
-        
-        if len(valid_positions) < 2:
-            return []
-            
-        clusters = []
-        processed = set()
-        
-        # Simple clustering algorithm based on proximity
-        for i, pos1 in enumerate(valid_positions):
-            if i in processed:
-                continue
-                
-            cluster = [pos1]
-            processed.add(i)
-            
-            # Find all positions close to this one
-            for j, pos2 in enumerate(valid_positions):
-                if j in processed:
-                    continue
-                    
-                distance = self._calculate_distance(
-                    pos1["lat"], pos1["lon"],
-                    pos2["lat"], pos2["lon"]
-                )
-                
-                # If within 100km, consider part of the same cluster
-                if distance < 100:
-                    cluster.append(pos2)
-                    processed.add(j)
-            
-            # Only consider groups of 2 or more as clusters
-            if len(cluster) >= 2:
-                # Calculate cluster center
-                avg_lat = sum(p["lat"] for p in cluster) / len(cluster)
-                avg_lon = sum(p["lon"] for p in cluster) / len(cluster)
-                
-                clusters.append({
-                    "center": {"lat": avg_lat, "lon": avg_lon},
-                    "balloons": [p.get("id", "unknown") for p in cluster if "id" in p],
-                    "size": len(cluster)
-                })
-        
-        return clusters
-    
     def _analyze_wind_patterns(self, balloon_history: Dict[str, List[Dict]]) -> Dict[str, Any]:
         """
         Analyze wind patterns based on balloon movements.
-        Enhanced to generate patterns even with minimal data.
         
         Args:
             balloon_history: Dictionary mapping balloon ID to its history
@@ -586,19 +1041,83 @@ class DataProcessor:
         
         return wind_patterns
     
-    def correlate_with_weather_data(self, processed_data: Dict[str, Any], weather_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _identify_balloon_clusters(self, balloon_positions: List[Dict]) -> List[Dict[str, Any]]:
         """
-        Correlate balloon movement with weather data.
+        Identify clusters of balloons that are close to each other.
         
         Args:
-            processed_data: Processed balloon data
-            weather_data: Weather data
+            balloon_positions: List of balloon position data points
             
         Returns:
-            Dictionary with correlation analysis
+            List of cluster information
         """
-        # This would integrate with a weather API to get actual weather data
-        # For now, we'll return a placeholder
-        return {
-            "correlations": "Weather correlation analysis would go here"
-        }
+        # Filter positions with valid lat/lon
+        valid_positions = [p for p in balloon_positions if "lat" in p and "lon" in p]
+        
+        if len(valid_positions) < 2:
+            return []
+            
+        clusters = []
+        processed = set()
+        
+        # Simple clustering algorithm based on proximity
+        for i, pos1 in enumerate(valid_positions):
+            if i in processed:
+                continue
+                
+            cluster = [pos1]
+            processed.add(i)
+            
+            # Find all positions close to this one
+            for j, pos2 in enumerate(valid_positions):
+                if j in processed:
+                    continue
+                    
+                distance = self._calculate_distance(
+                    pos1["lat"], pos1["lon"],
+                    pos2["lat"], pos2["lon"]
+                )
+                
+                # If within 100km, consider part of the same cluster
+                if distance < 100:
+                    cluster.append(pos2)
+                    processed.add(j)
+            
+            # Only consider groups of 2 or more as clusters
+            if len(cluster) >= 2:
+                # Calculate cluster center
+                avg_lat = sum(p["lat"] for p in cluster) / len(cluster)
+                avg_lon = sum(p["lon"] for p in cluster) / len(cluster)
+                
+                clusters.append({
+                    "center": {"lat": avg_lat, "lon": avg_lon},
+                    "balloons": [p.get("id", "unknown") for p in cluster if "id" in p],
+                    "size": len(cluster)
+                })
+        
+        return clusters
+    
+    def sanitize_json_data(self, data):
+        """
+        Recursively sanitize a data structure to ensure all values are JSON-serializable.
+        Replaces NaN, infinity, and other problematic values.
+        
+        Args:
+            data: Any data structure (dict, list, etc.)
+            
+        Returns:
+            Sanitized data structure
+        """
+        if isinstance(data, dict):
+            return {k: self.sanitize_json_data(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [self.sanitize_json_data(item) for item in data]
+        elif isinstance(data, (float, np.float32, np.float64)):
+            # Replace NaN and infinity with 0.0
+            if math.isnan(data) or math.isinf(data):
+                return 0.0
+            return float(data)  # Convert numpy types to standard float
+        elif isinstance(data, (np.int32, np.int64)):
+            return int(data)  # Convert numpy types to standard int
+        else:
+            return data

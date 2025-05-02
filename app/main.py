@@ -55,6 +55,11 @@ async def insights(request: Request):
     """Serve the insights page."""
     return templates.TemplateResponse("insights.html", {"request": request})
 
+@app.get("/enhanced-insights")
+async def enhanced_insights(request: Request):
+    """Serve the enhanced insights page."""
+    return templates.TemplateResponse("enhanced-insights.html", {"request": request})
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize data on startup."""

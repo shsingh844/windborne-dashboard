@@ -1,0 +1,1296 @@
+{% extends "base.html" %}
+
+{% block title %}Enhanced Insights - Windborne Constellation Tracker{% endblock %}
+
+{% block extra_css %}
+<style>
+    .prediction-card {
+        transition: transform 0.3s ease;
+        height: 100%;
+    }
+    
+    .prediction-card:hover {
+        transform: translateY(-5px);
+    }
+    
+    .chart-container {
+        height: 300px;
+        position: relative;
+    }
+    
+    .notes-section {
+        background-color: #f8f9fa;
+        border-left: 4px solid #0d6efd;
+        padding: 15px;
+        margin-bottom: 20px;
+    }
+    
+    #trajectory-map {
+        height: 400px;
+    }
+    
+    .api-section {
+        background-color: rgba(255, 255, 255, 0.9);
+        padding: 15px;
+        border-radius: 5px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        margin-bottom: 20px;
+    }
+    
+    .api-key-input {
+        max-width: 100%;
+    }
+    
+    .confidence-badge {
+        display: inline-block;
+        width: 70px;
+        text-align: center;
+    }
+    
+    .altitude-band {
+        padding: 10px;
+        margin-bottom: 10px;
+        border-radius: 5px;
+    }
+    
+    .altitude-band.optimal {
+        background-color: rgba(40, 167, 69, 0.1);
+        border-left: 4px solid #28a745;
+    }
+    
+    .altitude-band.good {
+        background-color: rgba(23, 162, 184, 0.1);
+        border-left: 4px solid #17a2b8;
+    }
+    
+    .altitude-band.moderate {
+        background-color: rgba(255, 193, 7, 0.1);
+        border-left: 4px solid #ffc107;
+    }
+    
+    .anomaly-card {
+        border-left: 4px solid #dc3545;
+        margin-bottom: 10px;
+    }
+    
+    .loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(255, 255, 255, 0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+    
+    /* Animation for prediction path */
+    @keyframes dash {
+        to {
+            stroke-dashoffset: 0;
+        }
+    }
+    
+    .prediction-path {
+        stroke-dasharray: 8;
+        stroke-dashoffset: 200;
+        animation: dash 5s linear forwards;
+    }
+    
+    /* Styles for LLM insights */
+    .llm-insights-container {
+        display: none; /* Hidden by default */
+    }
+    
+    .llm-insight-card {
+        border-left: 4px solid #6f42c1;
+        margin-bottom: 15px;
+    }
+    
+    .llm-badge {
+        background-color: #6f42c1;
+        color: white;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center">
+            <h1>Enhanced Constellation Insights</h1>
+            <div>
+                <button id="refresh-insights-btn" class="btn btn-outline-primary">
+                    <i class="bi bi-arrow-clockwise"></i> Refresh
+                </button>
+                <small id="last-updated" class="text-muted ms-2">Last updated: Loading...</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- API Key Input Section -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="api-section">
+            <h5>
+                <i class="bi bi-stars"></i> 
+                Enable Advanced AI Insights with Claude
+            </h5>
+            <p>
+                Unlock detailed operational recommendations and anomaly explanations by providing your Anthropic API key.
+                Your key is stored locally in your browser and never sent to our servers.
+            </p>
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <div class="input-group mb-3 api-key-input">
+                        <input type="password" class="form-control" id="anthropic-api-key" placeholder="Enter Anthropic API Key">
+                        <button class="btn btn-outline-primary" type="button" id="apply-api-key">Apply</button>
+                        <button class="btn btn-outline-secondary" type="button" id="toggle-key-visibility">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                    </div>
+                    <div id="api-key-message"></div>
+                </div>
+                <div class="col-md-4 text-end">
+                    <a href="https://console.anthropic.com/" target="_blank" class="btn btn-outline-secondary">
+                        <i class="bi bi-box-arrow-up-right"></i> Get API Key
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- LLM Insights Section (hidden by default) -->
+<div id="llm-insights-container" class="llm-insights-container row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-light">
+                <h5 class="card-title mb-0">
+                    <span class="badge llm-badge me-2">AI</span>
+                    Operational Intelligence
+                </h5>
+            </div>
+            <div class="card-body">
+                <div id="llm-insights-content">
+                    <div class="text-center py-3" id="llm-insights-loading">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Generating insights...</span>
+                        </div>
+                        <p class="mt-2">Analyzing constellation data with Claude...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Trajectory Prediction Section -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">Trajectory Prediction</h5>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="toggle-predictions" checked>
+                        <label class="form-check-label" for="toggle-predictions">Show Predictions</label>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="trajectory-map"></div>
+                <div class="row mt-3">
+                    <div class="col-md-4">
+                        <div class="form-group">
+                            <label for="balloon-selector" class="form-label">Select Balloon</label>
+                            <select class="form-select" id="balloon-selector">
+                                <option value="">Loading balloons...</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="col-md-8" id="trajectory-forecast-details">
+                        <div class="alert alert-info">
+                            Select a balloon to see its detailed trajectory forecast
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Atmospheric Anomalies and Launch Sites -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Atmospheric Anomalies</h5>
+            </div>
+            <div class="card-body">
+                <div id="anomalies-container">
+                    <div class="text-center py-3">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2">Analyzing atmospheric conditions...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Optimal Launch Sites</h5>
+            </div>
+            <div class="card-body">
+                <div id="launch-sites-container">
+                    <div class="text-center py-3">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2">Calculating optimal launch sites...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Performance Analytics -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Performance Analytics</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h6 class="mb-3">Optimal Altitude Bands</h6>
+                        <div id="altitude-bands-container">
+                            <div class="text-center py-3">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p class="mt-2">Analyzing altitude performance...</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-8">
+                        <h6 class="mb-3">Efficiency Metrics</h6>
+                        <div class="row" id="efficiency-metrics-container">
+                            <div class="col-12">
+                                <div class="text-center py-3">
+                                    <div class="spinner-border text-primary" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <p class="mt-2">Calculating efficiency metrics...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Global variables for data
+    let balloonData = null;
+    let weatherData = null;
+    let trajectoryMap = null;
+    let markersLayer = null;
+    let predictionsLayer = null;
+    let selectedBalloonId = null;
+    let anthropicApiKey = localStorage.getItem('anthropicApiKey') || '';
+    
+    // Initialize on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize trajectory map
+        initializeTrajectoryMap();
+        
+        // Set up API key toggle and application
+        setupApiKeyHandling();
+        
+        // Load initial data
+        updateEnhancedInsights();
+        
+        // Set up refresh button
+        document.getElementById('refresh-insights-btn')?.addEventListener('click', function() {
+            this.disabled = true;
+            
+            // Add null check before updating text content
+            const lastUpdatedElem = document.getElementById('last-updated');
+            if (lastUpdatedElem) {
+                lastUpdatedElem.textContent = 'Refreshing data...';
+            }
+            
+            // Request data refresh
+            fetch('/api/refresh')
+                .then(() => {
+                    // Wait a moment for server to update
+                    setTimeout(() => {
+                        updateEnhancedInsights();
+                        this.disabled = false;
+                    }, 2000);
+                })
+                .catch(error => {
+                    console.error('Error refreshing data:', error);
+                    if (lastUpdatedElem) {
+                        lastUpdatedElem.textContent = `Error refreshing data: ${error.message}`;
+                    }
+                    this.disabled = false;
+                });
+        });
+        
+        // Set up balloon selector change event
+        document.getElementById('balloon-selector').addEventListener('change', function() {
+            selectedBalloonId = this.value;
+            if (selectedBalloonId) {
+                updateSelectedBalloonDetails();
+            } else {
+                document.getElementById('trajectory-forecast-details').innerHTML = 
+                    '<div class="alert alert-info">Select a balloon to see its detailed trajectory forecast</div>';
+            }
+        });
+        
+        // Set up predictions toggle
+        document.getElementById('toggle-predictions').addEventListener('change', function() {
+            if (this.checked) {
+                if (predictionsLayer) trajectoryMap.addLayer(predictionsLayer);
+            } else {
+                if (predictionsLayer) trajectoryMap.removeLayer(predictionsLayer);
+            }
+        });
+        
+        // Set up periodic refresh every 5 minutes
+        setInterval(updateEnhancedInsights, 5 * 60 * 1000);
+    });
+    
+    // Function to initialize trajectory map
+    function initializeTrajectoryMap() {
+        trajectoryMap = L.map('trajectory-map').setView([20, 0], 2);
+        
+        // Add the base map layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(trajectoryMap);
+        
+        // Create marker layer
+        markersLayer = L.layerGroup().addTo(trajectoryMap);
+        predictionsLayer = L.layerGroup().addTo(trajectoryMap);
+    }
+    
+    // Function to set up API key handling
+    function setupApiKeyHandling() {
+        const apiKeyInput = document.getElementById('anthropic-api-key');
+        const toggleKeyBtn = document.getElementById('toggle-key-visibility');
+        const applyKeyBtn = document.getElementById('apply-api-key');
+        
+        // Set initial API key from storage
+        if (anthropicApiKey) {
+            apiKeyInput.value = anthropicApiKey;
+            apiKeyInput.type = 'password';
+        }
+        
+        // Toggle key visibility
+        toggleKeyBtn.addEventListener('click', function() {
+            if (apiKeyInput.type === 'password') {
+                apiKeyInput.type = 'text';
+                toggleKeyBtn.innerHTML = '<i class="bi bi-eye-slash"></i>';
+            } else {
+                apiKeyInput.type = 'password';
+                toggleKeyBtn.innerHTML = '<i class="bi bi-eye"></i>';
+            }
+        });
+        
+        // Apply API key
+        applyKeyBtn.addEventListener('click', function() {
+            const newKey = apiKeyInput.value.trim();
+            
+            if (!newKey) {
+                // Clear key if empty
+                anthropicApiKey = '';
+                localStorage.removeItem('anthropicApiKey');
+                document.getElementById('api-key-message').innerHTML = 
+                    '<div class="alert alert-warning">API key cleared. Advanced insights disabled.</div>';
+                document.getElementById('llm-insights-container').style.display = 'none';
+                return;
+            }
+            
+            // Validate key (keys start with 'sk-ant-')
+            if (!newKey.startsWith('sk-ant-')) {
+                document.getElementById('api-key-message').innerHTML = 
+                    '<div class="alert alert-danger">Invalid Anthropic API key format. Keys should start with "sk-ant-"</div>';
+                return;
+            }
+            
+            // Show loading message
+            document.getElementById('api-key-message').innerHTML = 
+                '<div class="alert alert-info">Validating API key...</div>';
+            
+            // Send key to server for validation
+            fetch('/api/validate-anthropic-key', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ key: newKey })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.valid) {
+                    // Save key to localStorage
+                    anthropicApiKey = newKey;
+                    localStorage.setItem('anthropicApiKey', newKey);
+                    
+                    // Show success message
+                    document.getElementById('api-key-message').innerHTML = 
+                        '<div class="alert alert-success">API key validated successfully! Advanced insights enabled.</div>';
+                    
+                    // Show LLM insights container and generate insights
+                    document.getElementById('llm-insights-container').style.display = 'block';
+                    generateLLMInsights();
+                } else {
+                    // Show error message
+                    document.getElementById('api-key-message').innerHTML = 
+                        `<div class="alert alert-danger">API key validation failed: ${data.message}</div>`;
+                }
+            })
+            .catch(error => {
+                console.error('Error validating API key:', error);
+                document.getElementById('api-key-message').innerHTML = 
+                    `<div class="alert alert-danger">Error validating API key: ${error.message}</div>`;
+            });
+        });
+        
+        // Check if we have a valid key to begin with
+        if (anthropicApiKey) {
+            // Validate the stored key
+            fetch('/api/validate-anthropic-key', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ key: anthropicApiKey })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.valid) {
+                    // Show success message
+                    document.getElementById('api-key-message').innerHTML = 
+                        '<div class="alert alert-success">API key validated successfully! Advanced insights enabled.</div>';
+                    
+                    // Show LLM insights container and generate insights
+                    document.getElementById('llm-insights-container').style.display = 'block';
+                    generateLLMInsights();
+                } else {
+                    // Show error message
+                    document.getElementById('api-key-message').innerHTML = 
+                        `<div class="alert alert-danger">Saved API key is invalid: ${data.message}</div>`;
+                }
+            })
+            .catch(error => {
+                console.error('Error validating saved API key:', error);
+            });
+        }
+    }
+    
+    // Main function to update all enhanced insights
+    function updateEnhancedInsights() {
+        try {
+            document.getElementById('last-updated').textContent = 'Loading data...';
+            
+            // Fetch balloon data
+            fetch('/api/enhanced-balloon-data')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`API error: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    balloonData = data;
+                    console.log('Enhanced balloon data received:', balloonData);
+                    
+                    // Update UI components
+                    updateBalloonSelector();
+                    updateTrajectoryMap();
+                    updateLaunchSites();
+                    updateAtmosphericAnomalies();
+                    updateAltitudeBands();
+                    updateEfficiencyMetrics();
+                    
+                    // Generate LLM insights if API key available
+                    if (anthropicApiKey && document.getElementById('llm-insights-container').style.display === 'block') {
+                        generateLLMInsights();
+                    }
+                    
+                    // Update last updated time
+                    document.getElementById('last-updated').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+                })
+                .catch(error => {
+                    console.error('Error fetching enhanced balloon data:', error);
+                    document.getElementById('last-updated').textContent = `Error: ${error.message}`;
+                });
+                
+            // Fetch weather data
+            fetch('/api/weather-data')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`Weather API error: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    weatherData = data;
+                    console.log('Weather data received:', weatherData);
+                })
+                .catch(error => {
+                    console.error('Error fetching weather data:', error);
+                });
+        } catch (error) {
+            console.error('Error in updateEnhancedInsights:', error);
+        }
+    }
+    
+    // Function to update balloon selector dropdown
+    function updateBalloonSelector() {
+        if (!balloonData || !balloonData.balloons) return;
+        
+        const balloonSelector = document.getElementById('balloon-selector');
+        
+        // Clear existing options
+        balloonSelector.innerHTML = '<option value="">Select a balloon...</option>';
+        
+        // Sort balloons by ID
+        const sortedBalloons = [...balloonData.balloons].sort((a, b) => {
+            return a.id.localeCompare(b.id, undefined, { numeric: true });
+        });
+        
+        // Add new options
+        sortedBalloons.forEach(balloon => {
+            const option = document.createElement('option');
+            option.value = balloon.id;
+            option.textContent = `Balloon ${balloon.id} - Altitude: ${balloon.latest.alt ? 
+                Math.round(balloon.latest.alt).toLocaleString() + 'm' : 'Unknown'}`;
+            balloonSelector.appendChild(option);
+        });
+        
+        // Restore previously selected balloon if it still exists
+        if (selectedBalloonId) {
+            const exists = sortedBalloons.some(b => b.id === selectedBalloonId);
+            if (exists) {
+                balloonSelector.value = selectedBalloonId;
+                updateSelectedBalloonDetails();
+            } else {
+                selectedBalloonId = null;
+            }
+        }
+    }
+    
+    // Function to update trajectory map
+    function updateTrajectoryMap() {
+        if (!balloonData || !balloonData.balloons || !trajectoryMap) return;
+        
+        // Clear existing markers and predictions
+        markersLayer.clearLayers();
+        predictionsLayer.clearLayers();
+        
+        // Add balloon markers
+        balloonData.balloons.forEach(balloon => {
+            if (!balloon.latest || !balloon.latest.lat || !balloon.latest.lon) return;
+            
+            // Determine marker color based on activity status
+            const isActive = balloon.latest.timestamp && 
+                            (Date.now() / 1000 - balloon.latest.timestamp) < 7200; // 2 hours
+            const fillColor = isActive ? '#28a745' : '#dc3545';
+            
+            // Create marker
+            const marker = L.circleMarker([balloon.latest.lat, balloon.latest.lon], {
+                radius: 6,
+                fillColor: fillColor,
+                color: '#fff',
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.8
+            });
+            
+            // Highlight selected balloon
+            if (balloon.id === selectedBalloonId) {
+                marker.setStyle({
+                    radius: 8,
+                    weight: 2,
+                    color: '#ffff00'
+                });
+            }
+            
+            // Add popup with balloon info
+            marker.bindPopup(`
+                <div class="balloon-popup">
+                    <h6>Balloon ${balloon.id}</h6>
+                    <table class="table table-sm">
+                        <tr>
+                            <td>Position:</td>
+                            <td>${balloon.latest.lat.toFixed(4)}, ${balloon.latest.lon.toFixed(4)}</td>
+                        </tr>
+                        <tr>
+                            <td>Altitude:</td>
+                            <td>${balloon.latest.alt ? balloon.latest.alt.toLocaleString() + ' m' : 'Unknown'}</td>
+                        </tr>
+                        <tr>
+                            <td>Status:</td>
+                            <td><span class="badge ${isActive ? 'bg-success' : 'bg-danger'}">${isActive ? 'Active' : 'Inactive'}</span></td>
+                        </tr>
+                        ${balloon.avg_speed ? `
+                        <tr>
+                            <td>Avg Speed:</td>
+                            <td>${balloon.avg_speed.toFixed(1)} km/h</td>
+                        </tr>` : ''}
+                        ${balloon.direction ? `
+                        <tr>
+                            <td>Direction:</td>
+                            <td>${balloon.direction}</td>
+                        </tr>` : ''}
+                    </table>
+                    <button class="btn btn-sm btn-primary select-balloon-btn" data-balloon-id="${balloon.id}">
+                        Select this balloon
+                    </button>
+                </div>
+            `);
+            
+            // Add click event to select balloon
+            marker.on('click', () => {
+                // Update select dropdown
+                document.getElementById('balloon-selector').value = balloon.id;
+                selectedBalloonId = balloon.id;
+                updateSelectedBalloonDetails();
+                updateTrajectoryMap();
+            });
+            
+            // Add to markers layer
+            markersLayer.addLayer(marker);
+        });
+        
+        // Add prediction paths if available
+        if (balloonData.predictions && balloonData.predictions.trajectory_forecasts) {
+            const forecasts = balloonData.predictions.trajectory_forecasts;
+            
+            for (const [balloonId, prediction] of Object.entries(forecasts)) {
+                // Skip if no prediction or less than 2 points
+                if (!prediction || prediction.length < 2) continue;
+                
+                // Get the balloon's current position
+                const balloon = balloonData.balloons.find(b => b.id === balloonId);
+                if (!balloon || !balloon.latest) continue;
+                
+                const startPos = [balloon.latest.lat, balloon.latest.lon];
+                
+                // Create prediction points array
+                const points = [startPos];
+                prediction.forEach(point => {
+                    points.push([point.lat, point.lon]);
+                });
+                
+                // Create path with dashed line
+                const predictionPath = L.polyline(points, {
+                    color: balloonId === selectedBalloonId ? '#ffff00' : '#3388ff',
+                    weight: balloonId === selectedBalloonId ? 3 : 2,
+                    opacity: balloonId === selectedBalloonId ? 0.8 : 0.5,
+                    dashArray: '5, 5',
+                    className: 'prediction-path'
+                });
+                
+                // Add hour markers along the path
+                prediction.forEach(point => {
+                    // Create hour marker
+                    const hourMarker = L.circleMarker([point.lat, point.lon], {
+                        radius: 3,
+                        fillColor: balloonId === selectedBalloonId ? '#ffff00' : '#3388ff',
+                        color: '#fff',
+                        weight: 1,
+                        opacity: 0.8,
+                        fillOpacity: 0.8
+                    });
+                    
+                    // Add popup with hour info
+                    hourMarker.bindPopup(`
+                        <div class="prediction-popup">
+                            <h6>Balloon ${balloonId}</h6>
+                            <p><strong>Prediction for ${point.hours_ahead} hours ahead</strong></p>
+                            <p>Position: ${point.lat.toFixed(4)}, ${point.lon.toFixed(4)}</p>
+                            <p>Confidence: ${(point.confidence * 100).toFixed(0)}%</p>
+                        </div>
+                    `);
+                    
+                    // Add to predictions layer
+                    predictionsLayer.addLayer(hourMarker);
+                });
+                
+                // Add to predictions layer
+                predictionsLayer.addLayer(predictionPath);
+            }
+        }
+        
+        // Add predictions layer if toggle is checked
+        if (document.getElementById('toggle-predictions').checked) {
+            trajectoryMap.addLayer(predictionsLayer);
+        } else {
+            trajectoryMap.removeLayer(predictionsLayer);
+        }
+        
+        // Set up popup button click events
+        trajectoryMap.on('popupopen', function(e) {
+            const selectButtons = document.querySelectorAll('.select-balloon-btn');
+            selectButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    // Update select dropdown
+                    const balloonId = this.dataset.balloonId;
+                    document.getElementById('balloon-selector').value = balloonId;
+                    selectedBalloonId = balloonId;
+                    updateSelectedBalloonDetails();
+                    updateTrajectoryMap();
+                    trajectoryMap.closePopup();
+                });
+            });
+        });
+    }
+    
+    // Function to update selected balloon details
+    function updateSelectedBalloonDetails() {
+        if (!selectedBalloonId || !balloonData || !balloonData.predictions) {
+            return;
+        }
+        
+        // Get forecast for the selected balloon
+        const forecast = balloonData.predictions.trajectory_forecasts[selectedBalloonId];
+        if (!forecast || forecast.length === 0) {
+            document.getElementById('trajectory-forecast-details').innerHTML = 
+                '<div class="alert alert-warning">No trajectory forecast available for this balloon</div>';
+            return;
+        }
+        
+        // Find the balloon object
+        const balloon = balloonData.balloons.find(b => b.id === selectedBalloonId);
+        if (!balloon) return;
+        
+        // Build forecast table
+        let html = '<h6>Trajectory Forecast</h6>';
+        html += '<table class="table table-sm table-striped">';
+        html += '<thead><tr><th>Hours Ahead</th><th>Position</th><th>Confidence</th></tr></thead>';
+        html += '<tbody>';
+        
+        forecast.forEach(point => {
+            const confidence = point.confidence * 100;
+            let confidenceClass = 'bg-success';
+            if (confidence < 60) confidenceClass = 'bg-warning';
+            if (confidence < 40) confidenceClass = 'bg-danger';
+            
+            html += `<tr>
+                <td>${point.hours_ahead} hours</td>
+                <td>${point.lat.toFixed(4)}, ${point.lon.toFixed(4)}</td>
+                <td><span class="badge ${confidenceClass} confidence-badge">${confidence.toFixed(0)}%</span></td>
+            </tr>`;
+        });
+        
+        html += '</tbody></table>';
+        
+        // Add LLM-based trajectory analysis if API key available
+        if (anthropicApiKey) {
+            html += `<button id="analyze-trajectory-btn" class="btn btn-sm btn-primary mt-2">
+                <i class="bi bi-stars"></i> Generate Trajectory Analysis
+            </button>
+            <div id="trajectory-analysis-result" class="mt-2"></div>`;
+        }
+        
+        document.getElementById('trajectory-forecast-details').innerHTML = html;
+        
+        // Center map on the balloon
+        if (balloon.latest && balloon.latest.lat && balloon.latest.lon) {
+            trajectoryMap.setView([balloon.latest.lat, balloon.latest.lon], 4);
+        }
+        
+        // Set up trajectory analysis button if it exists
+        const analyzeBtn = document.getElementById('analyze-trajectory-btn');
+        if (analyzeBtn) {
+            analyzeBtn.addEventListener('click', function() {
+                this.disabled = true;
+                this.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Analyzing...';
+                
+                // Get the balloon's wind layer
+                let windLayer = 'medium';
+                if (balloon.latest && balloon.latest.alt) {
+                    if (balloon.latest.alt < 5000) windLayer = 'low';
+                    else if (balloon.latest.alt >= 15000) windLayer = 'high';
+                }
+                
+                // Get wind data for this layer
+                const windData = balloonData.wind_patterns ? 
+                    balloonData.wind_patterns[windLayer] : null;
+                
+                // Call API to generate analysis
+                fetch('/api/trajectory-analysis', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        api_key: anthropicApiKey,
+                        balloon_id: selectedBalloonId,
+                        trajectory_data: forecast,
+                        wind_data: windData
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        document.getElementById('trajectory-analysis-result').innerHTML = 
+                            `<div class="alert alert-danger mt-2">${data.error}</div>`;
+                    } else {
+                        document.getElementById('trajectory-analysis-result').innerHTML = 
+                            `<div class="alert alert-info mt-2 llm-insight-card">
+                                <span class="badge llm-badge">AI</span>
+                                <div class="mt-2">${data.analysis.replace(/\n/g, '<br>')}</div>
+                            </div>`;
+                    }
+                    
+                    // Reset button
+                    analyzeBtn.disabled = false;
+                    analyzeBtn.innerHTML = '<i class="bi bi-stars"></i> Generate Trajectory Analysis';
+                })
+                .catch(error => {
+                    console.error('Error generating trajectory analysis:', error);
+                    document.getElementById('trajectory-analysis-result').innerHTML = 
+                        `<div class="alert alert-danger mt-2">Error: ${error.message}</div>`;
+                        
+                    // Reset button
+                    analyzeBtn.disabled = false;
+                    analyzeBtn.innerHTML = '<i class="bi bi-stars"></i> Generate Trajectory Analysis';
+                });
+            });
+        }
+    }
+    
+    // Function to update launch sites display
+    function updateLaunchSites() {
+        if (!balloonData || !balloonData.predictions || !balloonData.predictions.optimal_launch_sites) {
+            document.getElementById('launch-sites-container').innerHTML = 
+                '<div class="alert alert-warning">No launch site recommendations available</div>';
+            return;
+        }
+        
+        const launchSites = balloonData.predictions.optimal_launch_sites;
+        
+        if (launchSites.length === 0) {
+            document.getElementById('launch-sites-container').innerHTML = 
+                '<div class="alert alert-warning">No optimal launch sites found under current conditions</div>';
+            return;
+        }
+        
+        let html = '<div class="list-group">';
+        
+        launchSites.forEach(site => {
+            // Determine badge color based on score
+            let badgeClass = 'bg-success';
+            if (site.score < 80) badgeClass = 'bg-info';
+            if (site.score < 70) badgeClass = 'bg-warning';
+            
+            html += `
+                <div class="list-group-item">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h6 class="mb-1">${site.region}</h6>
+                        <span class="badge ${badgeClass}">${site.score.toFixed(0)}/100</span>
+                    </div>
+                    <p class="mb-1">
+                        <small class="text-muted">Coordinates: ${site.coordinates.lat.toFixed(2)}, ${site.coordinates.lon.toFixed(2)}</small>
+                    </p>
+                    <p class="mb-0">${site.rationale}</p>
+                </div>
+            `;
+        });
+        
+        html += '</div>';
+        
+        document.getElementById('launch-sites-container').innerHTML = html;
+    }
+    
+    // Function to update atmospheric anomalies display
+    function updateAtmosphericAnomalies() {
+        if (!balloonData || !balloonData.atmospheric_anomalies) {
+            document.getElementById('anomalies-container').innerHTML = 
+                '<div class="alert alert-warning">No atmospheric data available</div>';
+            return;
+        }
+        
+        const anomalies = balloonData.atmospheric_anomalies;
+        
+        if (anomalies.length === 0) {
+            document.getElementById('anomalies-container').innerHTML = 
+                '<div class="alert alert-success">No significant atmospheric anomalies detected</div>';
+            return;
+        }
+        
+        let html = '<div class="list-group">';
+        
+        anomalies.forEach(anomaly => {
+            // Determine badge color based on severity
+            let badgeClass = 'bg-warning';
+            if (anomaly.severity === 'high') badgeClass = 'bg-danger';
+            if (anomaly.severity === 'low') badgeClass = 'bg-info';
+            
+            html += `
+                <div class="list-group-item anomaly-card">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h6 class="mb-1">${anomaly.altitude_layer.toUpperCase()} Altitude Anomaly</h6>
+                        <span class="badge ${badgeClass}">${anomaly.severity.toUpperCase()}</span>
+                    </div>
+                    <p class="mb-1">${anomaly.description}</p>`;
+                    
+            // Add explain button if API key is available
+            if (anthropicApiKey) {
+                html += `
+                    <button class="btn btn-sm btn-outline-secondary explain-anomaly-btn mt-2" 
+                            data-anomaly-type="${anomaly.type}" 
+                            data-altitude-layer="${anomaly.altitude_layer}"
+                            data-current="${anomaly.current_value}"
+                            data-historical="${anomaly.historical_value}"
+                            data-diff="${anomaly.difference_percent}"
+                            data-severity="${anomaly.severity}">
+                        <i class="bi bi-stars"></i> Explain This Anomaly
+                    </button>
+                    <div class="anomaly-explanation mt-2"></div>`;
+            }
+            
+            html += `</div>`;
+        });
+        
+        html += '</div>';
+        
+        document.getElementById('anomalies-container').innerHTML = html;
+        
+        // Set up explain buttons if API key is available
+        if (anthropicApiKey) {
+            document.querySelectorAll('.explain-anomaly-btn').forEach(button => {
+                button.addEventListener('click', function() {
+                    const anomalyType = this.dataset.anomalyType;
+                    const altitudeLayer = this.dataset.altitudeLayer;
+                    const currentValue = this.dataset.current;
+                    const historicalValue = this.dataset.historical;
+                    const diffPercent = this.dataset.diff;
+                    const severity = this.dataset.severity;
+                    
+                    // Disable button and show loading
+                    this.disabled = true;
+                    this.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Generating...';
+                    
+                    // Find the explanation div (next sibling)
+                    const explanationDiv = this.nextElementSibling;
+                    
+                    // Call API to explain anomaly
+                    fetch('/api/explain-anomaly', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            api_key: anthropicApiKey,
+                            anomaly: {
+                                type: anomalyType,
+                                altitude_layer: altitudeLayer,
+                                current_value: parseFloat(currentValue),
+                                historical_value: parseFloat(historicalValue),
+                                difference_percent: parseFloat(diffPercent),
+                                severity: severity
+                            }
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            explanationDiv.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                        } else {
+                            explanationDiv.innerHTML = `
+                                <div class="alert alert-info llm-insight-card">
+                                    <span class="badge llm-badge">AI</span>
+                                    <div class="mt-2">${data.explanation.replace(/\n/g, '<br>')}</div>
+                                </div>`;
+                        }
+                        
+                        // Reset button
+                        this.disabled = false;
+                        this.innerHTML = '<i class="bi bi-stars"></i> Explain This Anomaly';
+                    })
+                    .catch(error => {
+                        console.error('Error explaining anomaly:', error);
+                        explanationDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+                        
+                        // Reset button
+                        this.disabled = false;
+                        this.innerHTML = '<i class="bi bi-stars"></i> Explain This Anomaly';
+                    });
+                });
+            });
+        }
+    }
+    
+    // Function to update altitude bands display
+    function updateAltitudeBands() {
+        if (!balloonData || !balloonData.performance_analytics || !balloonData.performance_analytics.optimal_altitude_bands) {
+            document.getElementById('altitude-bands-container').innerHTML = 
+                '<div class="alert alert-warning">No altitude performance data available</div>';
+            return;
+        }
+        
+        const altitudeBands = balloonData.performance_analytics.optimal_altitude_bands;
+        
+        if (altitudeBands.length === 0) {
+            document.getElementById('altitude-bands-container').innerHTML = 
+                '<div class="alert alert-warning">Insufficient data to determine optimal altitude bands</div>';
+            return;
+        }
+        
+        let html = '';
+        
+        altitudeBands.forEach(band => {
+            // Determine band class based on efficiency score
+            let bandClass = 'moderate';
+            if (band.efficiency_score > 80) bandClass = 'optimal';
+            else if (band.efficiency_score > 60) bandClass = 'good';
+            
+            html += `
+                <div class="altitude-band ${bandClass}">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h6 class="mb-1">${band.altitude_band}</h6>
+                        <span class="badge bg-primary">${band.efficiency_score.toFixed(0)}/100</span>
+                    </div>
+                    <p class="mb-0">${band.recommendation}</p>
+                    <div class="mt-1">
+                        <small class="text-muted">
+                            Speed: ${band.avg_speed.toFixed(1)} km/h | 
+                            Distance: ${band.avg_distance.toFixed(1)} km
+                        </small>
+                    </div>
+                </div>
+            `;
+        });
+        
+        document.getElementById('altitude-bands-container').innerHTML = html;
+    }
+    
+    // Function to update efficiency metrics display
+    function updateEfficiencyMetrics() {
+        if (!balloonData || !balloonData.performance_analytics || !balloonData.performance_analytics.efficiency_metrics) {
+            document.getElementById('efficiency-metrics-container').innerHTML = 
+                '<div class="alert alert-warning">No efficiency metrics data available</div>';
+            return;
+        }
+        
+        const metrics = balloonData.performance_analytics.efficiency_metrics;
+        
+        let html = '<div class="row">';
+        
+        // Speed efficiency card
+        html += `
+            <div class="col-md-4 mb-3">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Speed Efficiency</h6>
+                        <div class="display-4 text-primary">${metrics.avg_speed?.toFixed(1) || '0'}</div>
+                        <p class="card-text">Average km/h</p>
+                        <div class="text-muted small">
+                            Range: ${metrics.speed_efficiency?.min?.toFixed(1) || '0'} - 
+                            ${metrics.speed_efficiency?.max?.toFixed(1) || '0'} km/h
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Altitude efficiency card
+        html += `
+            <div class="col-md-4 mb-3">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Altitude Efficiency</h6>
+                        <div class="display-4 text-primary">
+                            ${(metrics.altitude_efficiency?.avg * 100)?.toFixed(1) || '0'}
+                        </div>
+                        <p class="card-text">Efficiency score</p>
+                        <div class="text-muted small">
+                            Higher values indicate better horizontal speed relative to altitude
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Coverage efficiency card
+        html += `
+            <div class="col-md-4 mb-3">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Coverage Efficiency</h6>
+                        <div class="display-4 text-primary">
+                            ${Math.round(metrics.coverage?.area_per_balloon || 0).toLocaleString()}
+                        </div>
+                        <p class="card-text">km² per balloon</p>
+                        <div class="text-muted small">
+                            Total coverage: ${Math.round(metrics.coverage?.total_area_km2 || 0).toLocaleString()} km²
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Operational metrics
+        html += `
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body">
+                        <h6 class="card-title">Operational Status</h6>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="progress mb-3" style="height: 25px;">
+                                    <div class="progress-bar ${metrics.operational_metrics?.active_percentage > 70 ? 'bg-success' : 'bg-warning'}" 
+                                        role="progressbar" 
+                                        style="width: ${metrics.operational_metrics?.active_percentage || 0}%;"
+                                        aria-valuenow="${metrics.operational_metrics?.active_percentage || 0}" 
+                                        aria-valuemin="0" 
+                                        aria-valuemax="100">
+                                        ${metrics.operational_metrics?.active_percentage?.toFixed(1) || 0}% Active
+                                    </div>
+                                </div>
+                                <p class="text-muted small">Percentage of balloons actively reporting data within the last 2 hours</p>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="text-center">
+                                    <div class="h3">${Math.round(metrics.operational_metrics?.avg_altitude || 0).toLocaleString()} m</div>
+                                    <p>Average operational altitude</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        html += '</div>';
+        
+        document.getElementById('efficiency-metrics-container').innerHTML = html;
+    }
+    
+    // Function to generate LLM insights using Claude API
+    function generateLLMInsights() {
+        if (!anthropicApiKey || !balloonData) return;
+        
+        // Show loading state
+        document.getElementById('llm-insights-loading').style.display = 'block';
+        
+        // Call API to generate insights
+        fetch('/api/generate-insights', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                api_key: anthropicApiKey,
+                balloon_data: balloonData,
+                weather_data: weatherData
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            // Hide loading state
+            document.getElementById('llm-insights-loading').style.display = 'none';
+            
+            if (data.error) {
+                document.getElementById('llm-insights-content').innerHTML = 
+                    `<div class="alert alert-danger">${data.error}</div>`;
+                return;
+            }
+            
+            // Format and display insights
+            let html = '';
+            
+            // Operational recommendations
+            if (data.operational_recommendations && data.operational_recommendations.length > 0) {
+                html += '<div class="mb-4">';
+                html += '<h5>Key Operational Recommendations</h5>';
+                html += '<div class="list-group">';
+                
+                data.operational_recommendations.forEach((rec, index) => {
+                    html += `
+                        <div class="list-group-item llm-insight-card">
+                            <div class="d-flex align-items-center">
+                                <span class="badge llm-badge me-2">${index+1}</span>
+                                <div>${rec}</div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += '</div>';
+                html += '</div>';
+            }
+            
+            // Wind analysis
+            if (data.wind_analysis) {
+                html += `
+                    <div class="mb-4">
+                        <h5>Wind Conditions Analysis</h5>
+                        <div class="card llm-insight-card">
+                            <div class="card-body">
+                                <p class="card-text">${data.wind_analysis}</p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Safety alerts
+            if (data.safety_alerts && data.safety_alerts.length > 0) {
+                html += '<div class="mb-4">';
+                html += '<h5>Safety Alerts</h5>';
+                html += '<div class="list-group">';
+                
+                data.safety_alerts.forEach(alert => {
+                    html += `
+                        <div class="list-group-item list-group-item-warning llm-insight-card">
+                            <div class="d-flex">
+                                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                                <div>${alert}</div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += '</div>';
+                html += '</div>';
+            }
+            
+            // Performance analysis
+            if (data.performance_analysis) {
+                html += `
+                    <div class="mb-4">
+                        <h5>Constellation Performance Analysis</h5>
+                        <div class="card llm-insight-card">
+                            <div class="card-body">
+                                <p class="card-text">${data.performance_analysis}</p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            document.getElementById('llm-insights-content').innerHTML = html;
+        })
+        .catch(error => {
+            console.error('Error generating insights:', error);
+            
+            // Hide loading state
+            document.getElementById('llm-insights-loading').style.display = 'none';
+            
+            document.getElementById('llm-insights-content').innerHTML = 
+                `<div class="alert alert-danger">Error generating insights: ${error.message}</div>`;
+        });
+    }
+</script>
+{% endblock %}

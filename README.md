@@ -2,11 +2,11 @@
 
 A comprehensive web application for real-time tracking, analysis, and operational insights from Windborne Systems' global sounding balloon constellation data.
 
-![Dashboard Preview](https://link-to-render-website)
+![Dashboard Preview](https://windborne-dashboard.onrender.com)
 
 ## Overview
 
-The Windborne Constellation Tracker fetches data from the live Windborne API (`https://a.windbornesystems.com/treasure/XX.json`), processes potentially corrupted data robustly, and provides a feature-rich interface with multiple visualization types and analytical tools. The application automatically refreshes data and dynamically updates insights, making it an ideal operational tool for constellation management.
+The Windborne Constellation Tracker fetches data from the live Windborne API (`https://a.windbornesystems.com/treasure/XX.json`), processes potentially corrupted data robustly, and provides a feature-rich interface with multiple visualization types, analytical tools and recommendations via llm (claude). The application automatically refreshes data and dynamically updates insights, making it an ideal operational tool for constellation management.
 
 ## Features
 
@@ -32,12 +32,23 @@ The Windborne Constellation Tracker fetches data from the live Windborne API (`h
 - **Time-Based Filtering**: Filter data by different time ranges (24h, 12h, 6h)
 
 ### Insights
-- **Weather Integration**: Combines balloon data with OpenWeather API data
+- **Weather Integration**: Combines balloon data with free Open-Meteo API
 - **Wind Impact Analysis**: Correlation between wind speeds and balloon performance
 - **Altitude-Weather Relationship**: Analysis of optimal altitude ranges based on weather
 - **Performance Index**: Custom performance metrics combining speed, distance, and data density
 - **Deployment Recommendations**: Actionable insights for optimal balloon deployment
 - **Anomaly Detection**: Automatic identification of unusual balloon behavior
+
+### Enhanced Insights
+- **Trajectory prediction**: Forecasts balloon positions 6-24 hours ahead
+- **Atmospheric anomaly detection**: Compares current conditions with historical averages
+- **Performance analytics** Identifies optimal altitude bands for efficient operations
+- **Launch site recommendations**: Based on current wind patterns
+- **LLM Insights**: Adds AI-powered analysis as an optional feature
+- **Enhanced Visualization**: Interactive trajectory map with confidence indicators, 
+                              Atmospheric anomaly detection with explanation, capabilities,
+                              Optimal altitude band recommendations with performance metrics, and
+                              Efficiency metrics with visual indicators 
 
 ## Project Structure
 
@@ -49,9 +60,13 @@ windborne-constellation/
 │   ├── api/
 │   │   ├── __init__.py
 │   │   └── routes.py    # API endpoints
+|   |── data/
+│   │   ├── weather_cache.pkl
 │   ├── services/
 │   │   ├── __init__.py
 │   │   ├── data_fetcher.py  # Fetch and clean data from Windborne API
+|   |   ├── llm_insights_service.py # Generate insights using Claude
+|   |   ├── weather_data_service.py # Fetch & process weather data from open-meteo
 │   │   └── data_processor.py # Process and analyze data
 │   ├── static/
 │   │   ├── css/
@@ -63,8 +78,12 @@ windborne-constellation/
 │       ├── index.html    # Dashboard page
 │       ├── map_view.html # Interactive map page
 │       ├── analytics.html # Detailed analytics page
+│       ├── enhanced_insights .html # AI based insights page
 │       └── insights.html # Operational insights page
 ├── .gitignore
+├── LICENSE
+├── procfile
+├── render.yaml
 ├── requirements.txt     # Python dependencies
 ├── README.md
 └── run.py              # Local development entry point
@@ -85,6 +104,7 @@ windborne-constellation/
 - **Real-time Updates**: Periodic data refresh using JavaScript
 
 ### Data Analysis Algorithms
+- **Proximity-based Tracking**: It identifies the same physical balloon across time periods by finding the nearest balloon in subsequent hours, which better represents actual balloon movement.
 - **Haversine Formula**: Accurate distance calculations on Earth's surface
 - **Balloon Clustering**: Geographic clustering algorithm to identify balloon groupings
 - **Wind Pattern Analysis**: Vector-based analysis of wind directions and speeds
@@ -196,7 +216,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgments
 
 - [Windborne Systems](https://windbornesystems.com) for the constellation API
-- [OpenWeather](https://openweathermap.org) for weather data
+- [OpenMeteo](https://open-meteo.com) for weather data
 - [OpenStreetMap](https://www.openstreetmap.org) for map tiles
 - [Leaflet.js](https://leafletjs.com) for interactive maps
 - [Chart.js](https://www.chartjs.org) for data visualizations
