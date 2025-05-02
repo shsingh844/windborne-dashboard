@@ -30,22 +30,20 @@ data_processor = DataProcessor()
 weather_service = WeatherDataService()
 llm_service = LLMInsightsService()
 
-@router.get("/api/balloons")
-async def get_balloons():
-    """Get all balloon data with their history."""
+# helper function
+async def _fetch_and_process_balloon_data(cache_key="balloon_data"):
+    """Common functionality for fetching and processing balloon data."""
     # Check if cache is valid
     current_time = time.time()
-    if (cache["balloon_data"] is not None and 
+    if (cache[cache_key] is not None and 
         current_time - cache["last_updated"] < cache["cache_duration"]):
-        logger.info("Returning cached balloon data")
-        return cache["balloon_data"]
+        logger.info(f"Returning cached {cache_key}")
+        return cache[cache_key]
     
     # If not already updating, trigger an update
     if not cache["is_updating"]:
         cache["is_updating"] = True
         try:
-            # Fetch and process data
-            
             # Fetch all hours of data
             all_hours_data = await data_fetcher.fetch_all_hours()
             
@@ -59,87 +57,30 @@ async def get_balloons():
             processed_data = data_processor.process_balloon_history(balloon_data)
             
             # Update cache
-            cache["balloon_data"] = processed_data
+            cache[cache_key] = processed_data
             cache["last_updated"] = current_time
             
-            logger.info("Balloon data updated successfully")
+            logger.info(f"{cache_key} updated successfully")
             return processed_data
             
         except Exception as e:
             logger.exception(f"Error fetching balloon data: {str(e)}")
             # If we have cached data, return it even if expired
-            if cache["balloon_data"] is not None:
-                return cache["balloon_data"]
+            if cache[cache_key] is not None:
+                return cache[cache_key]
             raise HTTPException(status_code=500, detail=f"Error processing balloon data: {str(e)}")
         finally:
             cache["is_updating"] = False
     else:
         # If update is in progress, return cached data or wait briefly for update
-        if cache["balloon_data"] is not None:
-            return cache["balloon_data"]
+        if cache[cache_key] is not None:
+            return cache[cache_key]
         
         # Wait a bit for the update to complete
         await asyncio.sleep(2)
         
-        if cache["balloon_data"] is not None:
-            return cache["balloon_data"]
-        
-        raise HTTPException(status_code=503, detail="Data is being updated, please try again shortly")
-
-@router.get("/api/enhanced-balloon-data")
-async def get_enhanced_balloon_data():
-    """Get enhanced balloon data with predictions and analytics."""
-    # Check if cache is valid
-    current_time = time.time()
-    if (cache["enhanced_balloon_data"] is not None and 
-        current_time - cache["last_updated"] < cache["cache_duration"]):
-        logger.info("Returning cached enhanced balloon data")
-        return cache["enhanced_balloon_data"]
-    
-    # If not already updating, trigger an update
-    if not cache["is_updating"]:
-        cache["is_updating"] = True
-        try:
-            # Fetch and process data
-            
-            # Fetch all hours of data
-            all_hours_data = await data_fetcher.fetch_all_hours()
-            
-            if not all_hours_data:
-                raise HTTPException(status_code=500, detail="Failed to fetch data from Windborne API")
-            
-            # Extract balloon history
-            balloon_data = data_fetcher.get_balloon_history(all_hours_data)
-            
-            # Process the data with enhanced analytics
-            processed_data = data_processor.process_balloon_history(balloon_data)
-            
-            # Update cache
-            cache["enhanced_balloon_data"] = processed_data
-            cache["balloon_data"] = processed_data  # Also update regular cache
-            cache["last_updated"] = current_time
-            
-            logger.info("Enhanced balloon data updated successfully")
-            return processed_data
-            
-        except Exception as e:
-            logger.exception(f"Error fetching enhanced balloon data: {str(e)}")
-            # If we have cached data, return it even if expired
-            if cache["enhanced_balloon_data"] is not None:
-                return cache["enhanced_balloon_data"]
-            raise HTTPException(status_code=500, detail=f"Error processing enhanced balloon data: {str(e)}")
-        finally:
-            cache["is_updating"] = False
-    else:
-        # If update is in progress, return cached data or wait briefly for update
-        if cache["enhanced_balloon_data"] is not None:
-            return cache["enhanced_balloon_data"]
-        
-        # Wait a bit for the update to complete
-        await asyncio.sleep(2)
-        
-        if cache["enhanced_balloon_data"] is not None:
-            return cache["enhanced_balloon_data"]
+        if cache[cache_key] is not None:
+            return cache[cache_key]
         
         raise HTTPException(status_code=503, detail="Data is being updated, please try again shortly")
 
@@ -189,6 +130,16 @@ async def get_weather_data():
     except Exception as e:
         logger.exception(f"Error fetching weather data: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching weather data: {str(e)}")
+
+@router.get("/api/balloons")
+async def get_balloons():
+    """Get all balloon data with their history."""
+    return await _fetch_and_process_balloon_data("balloon_data")
+
+@router.get("/api/enhanced-balloon-data")
+async def get_enhanced_balloon_data():
+    """Get enhanced balloon data with predictions and analytics."""
+    return await _fetch_and_process_balloon_data("enhanced_balloon_data")
 
 @router.post("/api/validate-anthropic-key")
 async def validate_anthropic_key(request: Request):
