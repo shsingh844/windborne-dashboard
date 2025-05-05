@@ -2,7 +2,9 @@
 
 A comprehensive web application for real-time tracking, analysis, and operational insights from Windborne Systems' global sounding balloon constellation data.
 
-![Dashboard Preview](https://windborne-dashboard.onrender.com)
+## Dashboard Preview
+
+https://windborne-dashboard.onrender.com
 
 ## Overview
 
@@ -111,6 +113,20 @@ windborne-constellation/
 - **Performance Index**: Custom algorithm combining multiple metrics to evaluate balloon performance
 - **Anomaly Detection**: Statistical outlier detection across multiple parameters
 
+### Performance Optimizations
+
+- **Centralized Utility Functions**: Common geographic calculations moved to a utility module
+- **Request Timeouts**: Implemented for all external API calls
+- **Loading Indicators**: Clear visual feedback during data processing
+- **Deferred API Validation**: Optional API keys only validated on demand, not on page load
+- **Optimized Data Caching**: Minimized redundant API calls with intelligent caching
+
+### Optional AI Integration
+- **Claude API Integration**: Optional integration with Anthropic's Claude API
+- **Client-Side Security**: API keys stored locally in the browser, never sent to our servers
+- **Request Timeouts**: Implemented to prevent UI freezes during API calls
+- **Graceful Fallbacks**: System functions without AI if API key isn't provided
+
 ## Metrics Explained
 
 ### Balloon-Specific Metrics
@@ -131,11 +147,19 @@ windborne-constellation/
 
 ### Internal APIs
 - `GET /api/balloons`: Returns all balloon data with trajectory history
+- `GET /api/enhanced-balloon-data`: Returns enhanced balloon data with predictions
+- `GET /api/weather-data`: Returns processed weather data from Open-Meteo and OpenWeather
 - `GET /api/refresh`: Forces a refresh of the constellation data
+- `POST /api/validate-anthropic-key`: Validates Anthropic API keys
+- `POST /api/generate-insights`: Generates AI-powered constellation insights
+- `POST /api/explain-anomaly`: Generates explanations for detected anomalies
+- `POST /api/trajectory-analysis`: Analyzes balloon trajectory predictions
 
 ### External APIs
 - **Windborne Systems API**: `https://a.windbornesystems.com/treasure/XX.json` (where XX is hours from 00-23)
-- **OpenWeather API** (optional): Used for weather data overlays on the Insights page
+- **Open-Meteo API**: Used for weather data (`https://api.open-meteo.com/v1/forecast`)
+- **OpenWeather API** (optional): Used for additional weather visualizations and overlays (`https://api.openweathermap.org`)
+- **Anthropic Claude API** (optional): Used for AI-powered analysis and insights
 - **OpenStreetMap**: Base map tiles for geographic visualizations
 
 ## Setup and Deployment
@@ -166,27 +190,6 @@ windborne-constellation/
 
 5. Open your browser and navigate to `http://localhost:8000`
 
-## Future Development Possibilities
-
-This project provides a foundation for several advanced extensions:
-
-### Enhanced Analysis
-- **Machine Learning Integration**: Predictive models for balloon trajectory forecasting
-- **Anomaly Detection Improvements**: More sophisticated algorithms to detect potential issues
-- **Historical Trend Analysis**: Longer-term analysis of performance patterns over weeks/months
-
-### Additional Features
-- **Alert System**: Automated notifications for anomalous balloon behavior
-- **Mission Planning Tools**: Interactive tools for planning new balloon deployments
-- **User Authentication**: Role-based access for different team members
-- **Custom Report Generation**: Exportable reports for operational teams
-- **Mobile App Integration**: API endpoints for mobile application development
-
-### Data Collection Expansion
-- **Additional Weather Data Sources**: Integration with more detailed weather APIs
-- **Satellite Data Integration**: Combining balloon data with satellite observations
-- **Ground Station Integration**: Adding data from ground-based observation stations
-
 ## Troubleshooting
 
 ### Common Issues
@@ -200,9 +203,15 @@ This project provides a foundation for several advanced extensions:
    - Ensure Leaflet.js is loading correctly
    - Check if your browser blocks third-party map tiles
 
+3. **Enhanced Insights Page Loading Slowly**:
+   - Use the "Apply" button to validate your API key instead of relying on automatic validation
+   - Check browser console for timeout errors
+   - Ensure your Anthropic API key starts with 'sk-ant-'
+
 3. **Weather Overlay Not Working**:
    - Verify your OpenWeather API key is correct
    - Check browser console for API-related errors
+   - Ensure your internet connection is stable
 
 ### Support
 
@@ -217,8 +226,10 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - [Windborne Systems](https://windbornesystems.com) for the constellation API
 - [OpenMeteo](https://open-meteo.com) for weather data
+- [OpenWeather](https://openweathermap.org) for additional weather data and visualizations
 - [OpenStreetMap](https://www.openstreetmap.org) for map tiles
 - [Leaflet.js](https://leafletjs.com) for interactive maps
 - [Chart.js](https://www.chartjs.org) for data visualizations
 - [Bootstrap](https://getbootstrap.com) for responsive design
 - [FastAPI](https://fastapi.tiangolo.com) for the backend framework
+- [Anthropic](https://www.anthropic.com) for Claude API
