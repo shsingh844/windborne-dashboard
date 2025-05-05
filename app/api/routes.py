@@ -58,6 +58,7 @@ async def _fetch_and_process_balloon_data(cache_key="balloon_data"):
             
             # Update cache
             cache[cache_key] = processed_data
+            cache["balloon_data"] = processed_data  # Also update regular cache
             cache["last_updated"] = current_time
             
             logger.info(f"{cache_key} updated successfully")

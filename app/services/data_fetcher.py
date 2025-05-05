@@ -6,6 +6,7 @@ import re
 from typing import Dict, List, Any, Optional, Tuple
 import time
 import math
+from app.utils import calculate_distance
 
 logger = logging.getLogger(__name__)
 
@@ -429,7 +430,7 @@ class DataFetcher:
         }
         
         return result
-    
+
     def _calculate_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """
         Calculate the great-circle distance between two points using the Haversine formula.
@@ -443,23 +444,7 @@ class DataFetcher:
         Returns:
             Distance in kilometers
         """
-        # Earth radius in kilometers
-        earth_radius = 6371.0
-        
-        # Convert to radians
-        lat1_rad = math.radians(lat1)
-        lon1_rad = math.radians(lon1)
-        lat2_rad = math.radians(lat2)
-        lon2_rad = math.radians(lon2)
-        
-        # Haversine formula
-        dlon = lon2_rad - lon1_rad
-        dlat = lat2_rad - lat1_rad
-        a = math.sin(dlat/2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon/2)**2
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-        distance = earth_radius * c
-        
-        return distance
+        return calculate_distance(lat1, lon1, lat2, lon2)
 
     def _calculate_3d_distance(self, lat1: float, lon1: float, alt1: float, 
                             lat2: float, lon2: float, alt2: float) -> float:
@@ -473,17 +458,4 @@ class DataFetcher:
         Returns:
             Distance in kilometers
         """
-        # First calculate the great-circle distance using Haversine formula
-        surface_distance = self._calculate_distance(lat1, lon1, lat2, lon2)
-        
-        # Convert altitude from meters to kilometers
-        alt1_km = alt1 / 1000.0
-        alt2_km = alt2 / 1000.0
-        
-        # Calculate altitude difference
-        alt_diff = alt2_km - alt1_km
-        
-        # Use Pythagorean theorem to find the 3D distance
-        distance_3d = math.sqrt(surface_distance**2 + alt_diff**2)
-        
-        return distance_3d
+        return calculate_distance(lat1, lon1, lat2, lon2, alt1, alt2)

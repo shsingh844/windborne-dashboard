@@ -62,7 +62,7 @@ class WeatherDataService:
         current_time = time.time()
         
         if cache_key in self.cache and current_time - self.cache_expiry.get(cache_key, 0) < self.cache_duration:
-            logger.info(f"Using cached weather data for {cache_key}")
+            logger.debug(f"Using cached weather data for {cache_key}")
             return self.cache[cache_key]
         
         # Fetch new data

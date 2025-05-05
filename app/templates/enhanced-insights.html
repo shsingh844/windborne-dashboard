@@ -435,69 +435,47 @@
             
             // Show loading message
             document.getElementById('api-key-message').innerHTML = 
-                '<div class="alert alert-info">Validating API key...</div>';
-            
-            // Send key to server for validation
-            fetch('/api/validate-anthropic-key', {
+                '<div class="alert alert-info">Validating API key...<div class="spinner-border spinner-border-sm ms-2" role="status"><span class="visually-hidden">Loading...</span></div></div>';
+                        
+            // Send key to server for validation with timeout
+            const fetchPromise = fetch('/api/validate-anthropic-key', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ key: newKey })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.valid) {
-                    // Save key to localStorage
-                    anthropicApiKey = newKey;
-                    localStorage.setItem('anthropicApiKey', newKey);
-                    
-                    // Show success message
-                    document.getElementById('api-key-message').innerHTML = 
-                        '<div class="alert alert-success">API key validated successfully! Advanced insights enabled.</div>';
-                    
-                    // Show LLM insights container and generate insights
-                    document.getElementById('llm-insights-container').style.display = 'block';
-                    generateLLMInsights();
-                } else {
-                    // Show error message
-                    document.getElementById('api-key-message').innerHTML = 
-                        `<div class="alert alert-danger">API key validation failed: ${data.message}</div>`;
-                }
-            })
-            .catch(error => {
-                console.error('Error validating API key:', error);
-                document.getElementById('api-key-message').innerHTML = 
-                    `<div class="alert alert-danger">Error validating API key: ${error.message}</div>`;
             });
+
+            // Add timeout for response
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Request timed out after 5 seconds')), 5000);
+            });
+
+            Promise.race([fetchPromise, timeoutPromise])
+                .then(response => response.json())
+                .then(data => {
+                    if (data.valid) {
+                        // Save key to localStorage
+                        anthropicApiKey = newKey;
+                        localStorage.setItem('anthropicApiKey', newKey);
+                        
+                        // Show success message
+                        document.getElementById('api-key-message').innerHTML = 
+                            '<div class="alert alert-success">API key validated successfully! Advanced insights enabled.</div>';
+                        
+                        // Show LLM insights container and generate insights
+                        document.getElementById('llm-insights-container').style.display = 'block';
+                        generateLLMInsights();
+                    } else {
+                        // Show error message
+                        document.getElementById('api-key-message').innerHTML = 
+                            `<div class="alert alert-danger">API key validation failed: ${data.message}</div>`;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error validating API key:', error);
+                    document.getElementById('api-key-message').innerHTML = 
+                        `<div class="alert alert-danger">Error validating API key: ${error.message}</div>`;
+                });
         });
-        
-        // Check if we have a valid key to begin with
-        if (anthropicApiKey) {
-            // Validate the stored key
-            fetch('/api/validate-anthropic-key', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ key: anthropicApiKey })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.valid) {
-                    // Show success message
-                    document.getElementById('api-key-message').innerHTML = 
-                        '<div class="alert alert-success">API key validated successfully! Advanced insights enabled.</div>';
-                    
-                    // Show LLM insights container and generate insights
-                    document.getElementById('llm-insights-container').style.display = 'block';
-                    generateLLMInsights();
-                } else {
-                    // Show error message
-                    document.getElementById('api-key-message').innerHTML = 
-                        `<div class="alert alert-danger">Saved API key is invalid: ${data.message}</div>`;
-                }
-            })
-            .catch(error => {
-                console.error('Error validating saved API key:', error);
-            });
-        }
     }
     
     // Main function to update all enhanced insights
@@ -1181,11 +1159,47 @@
     
     // Function to generate LLM insights using Claude API
     function generateLLMInsights() {
-        if (!anthropicApiKey || !balloonData) return;
+        if (!anthropicApiKey || !balloonData) {
+            document.getElementById('llm-insights-container').style.display = 'none';
+        return;
+        }
         
         // Show loading state
         document.getElementById('llm-insights-loading').style.display = 'block';
+        document.getElementById('llm-insights-content').innerHTML = '';
+
+        // Add timeout for the insights generation
+        const timeout = 30000; // 30 seconds
         
+        const fetchPromise = fetch('/api/generate-insights', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                api_key: anthropicApiKey,
+                balloon_data: balloonData,
+                weather_data: weatherData
+            })
+        });
+        
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Request timed out after 30 seconds')), timeout);
+        });
+    
+        Promise.race([fetchPromise, timeoutPromise])
+            .then(response => response.json())
+            .then(data => {
+                // Hide loading state
+                document.getElementById('llm-insights-loading').style.display = 'none';
+            // Process response...
+            })
+
+            .catch(error => {
+            console.error('Error generating insights:', error);
+            document.getElementById('llm-insights-loading').style.display = 'none';
+            document.getElementById('llm-insights-content').innerHTML = 
+                `<div class="alert alert-danger">Error generating insights: ${error.message}. Try again or check the API key.</div>`;
+            });
+
         // Call API to generate insights
         fetch('/api/generate-insights', {
             method: 'POST',
