@@ -1,5 +1,6 @@
-import uvicorn
 import os
+import uvicorn
+from app.main import app
 
 if __name__ == "__main__":
     # Get port from environment or use default
@@ -7,9 +8,8 @@ if __name__ == "__main__":
     
     # Run the application with uvicorn
     uvicorn.run(
-        "app.main:app",
+        app,
         host="0.0.0.0",
         port=port,
-        reload=True,  # Enable auto-reload for development
         log_level="info"
     )
