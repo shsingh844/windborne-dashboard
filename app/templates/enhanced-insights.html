@@ -313,15 +313,16 @@
     let anthropicApiKey = localStorage.getItem('anthropicApiKey') || '';
     
     // Initialize on page load
+    // Initialize on page load
     document.addEventListener('DOMContentLoaded', function() {
-        // Initialize trajectory map
+        // Initialize trajectory map - but don't show it yet
         initializeTrajectoryMap();
         
-        // Set up API key toggle and application
+        // Set up API key handling - this will hide enhanced content by default
         setupApiKeyHandling();
         
-        // Load initial data
-        updateEnhancedInsights();
+        // Load initial data, but don't show enhanced content until API key validation
+        loadBasicData();
         
         // Set up refresh button
         document.getElementById('refresh-insights-btn')?.addEventListener('click', function() {
@@ -338,7 +339,12 @@
                 .then(() => {
                     // Wait a moment for server to update
                     setTimeout(() => {
-                        updateEnhancedInsights();
+                        // Refresh data based on whether enhanced features are enabled
+                        if (anthropicApiKey && document.getElementById('llm-insights-container').style.display === 'block') {
+                            updateEnhancedInsights();
+                        } else {
+                            loadBasicData();
+                        }
                         this.disabled = false;
                     }, 2000);
                 })
@@ -371,8 +377,14 @@
             }
         });
         
-        // Set up periodic refresh every 5 minutes
-        setInterval(updateEnhancedInsights, 5 * 60 * 1000);
+        // Set up periodic refresh every 5 minutes - respecting the enhanced content visibility
+        setInterval(() => {
+            if (anthropicApiKey && document.getElementById('llm-insights-container').style.display === 'block') {
+                updateEnhancedInsights();
+            } else {
+                loadBasicData();
+            }
+        }, 5 * 60 * 1000);
     });
     
     // Function to initialize trajectory map
@@ -394,11 +406,46 @@
         const apiKeyInput = document.getElementById('anthropic-api-key');
         const toggleKeyBtn = document.getElementById('toggle-key-visibility');
         const applyKeyBtn = document.getElementById('apply-api-key');
+        const llmInsightsContainer = document.getElementById('llm-insights-container');
         
-        // Set initial API key from storage
-        if (anthropicApiKey) {
-            apiKeyInput.value = anthropicApiKey;
+        // Always ensure enhanced insights are hidden on page load, regardless of stored API key
+        if (llmInsightsContainer) {
+            llmInsightsContainer.style.display = 'none';
+        }
+        
+        // Get other content containers that should be hidden by default
+        const trajectoryMap = document.getElementById('trajectory-map');
+        const anomaliesContainer = document.getElementById('anomalies-container');
+        const launchSitesContainer = document.getElementById('launch-sites-container');
+        const altitudeBandsContainer = document.getElementById('altitude-bands-container');
+        const efficiencyMetricsContainer = document.getElementById('efficiency-metrics-container');
+        
+        // Initially hide these containers (they'll only be shown after API key validation)
+        const containersToHide = [
+            trajectoryMap, 
+            anomaliesContainer, 
+            launchSitesContainer, 
+            altitudeBandsContainer, 
+            efficiencyMetricsContainer
+        ];
+        
+        containersToHide.forEach(container => {
+            if (container) {
+                container.style.display = 'none';
+            }
+        });
+        
+        // Set initial API key from storage, but don't auto-validate
+        if (localStorage.getItem('anthropicApiKey')) {
+            apiKeyInput.value = localStorage.getItem('anthropicApiKey');
             apiKeyInput.type = 'password';
+            
+            // Show a message that the user needs to validate their stored key
+            const apiKeyMessageElement = document.getElementById('api-key-message');
+            if (apiKeyMessageElement) {
+                apiKeyMessageElement.innerHTML = 
+                    '<div class="alert alert-info">Found a saved API key. Click "Apply" to validate and enable enhanced insights.</div>';
+            }
         }
         
         // Toggle key visibility
@@ -414,70 +461,158 @@
         
         // Apply API key
         applyKeyBtn.addEventListener('click', function() {
+            const apiKeyMessageElement = document.getElementById('api-key-message');
+            if (!apiKeyMessageElement) {
+                console.error('api-key-message element not found');
+                return;
+            }
+            
             const newKey = apiKeyInput.value.trim();
             
             if (!newKey) {
                 // Clear key if empty
                 anthropicApiKey = '';
                 localStorage.removeItem('anthropicApiKey');
-                document.getElementById('api-key-message').innerHTML = 
+                apiKeyMessageElement.innerHTML = 
                     '<div class="alert alert-warning">API key cleared. Advanced insights disabled.</div>';
-                document.getElementById('llm-insights-container').style.display = 'none';
+                
+                // Hide all enhanced content
+                if (llmInsightsContainer) {
+                    llmInsightsContainer.style.display = 'none';
+                }
+                
+                containersToHide.forEach(container => {
+                    if (container) {
+                        container.style.display = 'none';
+                    }
+                });
+                
                 return;
             }
             
             // Validate key (keys start with 'sk-ant-')
             if (!newKey.startsWith('sk-ant-')) {
-                document.getElementById('api-key-message').innerHTML = 
+                apiKeyMessageElement.innerHTML = 
                     '<div class="alert alert-danger">Invalid Anthropic API key format. Keys should start with "sk-ant-"</div>';
                 return;
             }
             
             // Show loading message
-            document.getElementById('api-key-message').innerHTML = 
+            apiKeyMessageElement.innerHTML = 
                 '<div class="alert alert-info">Validating API key...<div class="spinner-border spinner-border-sm ms-2" role="status"><span class="visually-hidden">Loading...</span></div></div>';
                         
             // Send key to server for validation with timeout
-            const fetchPromise = fetch('/api/validate-anthropic-key', {
+            fetch('/api/validate-anthropic-key', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ key: newKey })
-            });
-
-            // Add timeout for response
-            const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('Request timed out after 30 seconds')), 30000);
-            });
-
-            Promise.race([fetchPromise, timeoutPromise])
-                .then(response => response.json())
-                .then(data => {
-                    if (data.valid) {
-                        // Save key to localStorage
-                        anthropicApiKey = newKey;
-                        localStorage.setItem('anthropicApiKey', newKey);
-                        
-                        // Show success message
-                        document.getElementById('api-key-message').innerHTML = 
-                            '<div class="alert alert-success">API key validated successfully! Advanced insights enabled.</div>';
-                        
-                        // Show LLM insights container and generate insights
-                        document.getElementById('llm-insights-container').style.display = 'block';
-                        generateLLMInsights();
-                    } else {
-                        // Show error message
-                        document.getElementById('api-key-message').innerHTML = 
-                            `<div class="alert alert-danger">API key validation failed: ${data.message}</div>`;
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.valid) {
+                    // Save key to localStorage
+                    anthropicApiKey = newKey;
+                    localStorage.setItem('anthropicApiKey', newKey);
+                    
+                    // Show success message
+                    apiKeyMessageElement.innerHTML = 
+                        '<div class="alert alert-success">API key validated successfully! Advanced insights enabled.</div>';
+                    
+                    // Show all enhanced content
+                    if (llmInsightsContainer) {
+                        llmInsightsContainer.style.display = 'block';
                     }
-                })
-                .catch(error => {
-                    console.error('Error validating API key:', error);
-                    document.getElementById('api-key-message').innerHTML = 
-                        `<div class="alert alert-danger">Error validating API key: ${error.message}</div>`;
+                    
+                    containersToHide.forEach(container => {
+                        if (container) {
+                            container.style.display = 'block';
+                        }
+                    });
+                    
+                    // Generate insights if balloon data is available
+                    if (balloonData) {
+                        generateLLMInsights();
+                        
+                        // Also update other enhanced visualizations
+                        updateTrajectoryMap();
+                        updateAtmosphericAnomalies();
+                        updateLaunchSites();
+                        updateAltitudeBands();
+                        updateEfficiencyMetrics();
+                    }
+                } else {
+                    // Show error message
+                    apiKeyMessageElement.innerHTML = 
+                        `<div class="alert alert-danger">API key validation failed: ${data.message || 'Unknown error'}</div>`;
+                    
+                    // Ensure all enhanced content is hidden
+                    if (llmInsightsContainer) {
+                        llmInsightsContainer.style.display = 'none';
+                    }
+                    
+                    containersToHide.forEach(container => {
+                        if (container) {
+                            container.style.display = 'none';
+                        }
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error validating API key:', error);
+                apiKeyMessageElement.innerHTML = 
+                    `<div class="alert alert-danger">Error validating API key: ${error.message}</div>`;
+                    
+                // Ensure all enhanced content is hidden
+                if (llmInsightsContainer) {
+                    llmInsightsContainer.style.display = 'none';
+                }
+                
+                containersToHide.forEach(container => {
+                    if (container) {
+                        container.style.display = 'none';
+                    }
                 });
+            });
         });
     }
-    
+
+    // function to load only basic data without enhanced features
+    function loadBasicData() {
+        try {
+            document.getElementById('last-updated').textContent = 'Loading data...';
+            
+            // Fetch basic balloon data without predictions
+            fetch('/api/balloons')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`API error: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    balloonData = data;
+                    console.log('Basic balloon data received');
+                    
+                    // Update UI components that don't require API key
+                    updateBalloonSelector();
+                    
+                    // Update last updated time
+                    document.getElementById('last-updated').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+                })
+                .catch(error => {
+                    console.error('Error fetching balloon data:', error);
+                    document.getElementById('last-updated').textContent = `Error: ${error.message}`;
+                });
+        } catch (error) {
+            console.error('Error in loadBasicData:', error);
+        }
+    }
+   
     // Main function to update all enhanced insights
     function updateEnhancedInsights() {
         try {
@@ -1159,69 +1294,80 @@
     
     // Function to generate LLM insights using Claude API
     function generateLLMInsights() {
+        console.log('generateLLMInsights called');
+        console.log('API key exists:', !!anthropicApiKey);
+        console.log('Balloon data exists:', !!balloonData);
+        
+        // Validate required data
         if (!anthropicApiKey || !balloonData) {
-            document.getElementById('llm-insights-container').style.display = 'none';
-        return;
+            console.warn('Missing required data for insights');
+            return;
         }
         
+        // Make sure we have the DOM elements
+        const loadingElement = document.getElementById('llm-insights-loading');
+        const contentElement = document.getElementById('llm-insights-content');
+        const containerElement = document.getElementById('llm-insights-container');
+        
+        if (!loadingElement || !contentElement || !containerElement) {
+            console.error('One or more required DOM elements for LLM insights not found');
+            return;
+        }
+        
+        // Make sure container is visible
+        containerElement.style.display = 'block';
+        
         // Show loading state
-        document.getElementById('llm-insights-loading').style.display = 'block';
-        document.getElementById('llm-insights-content').innerHTML = '';
-
-        // Add timeout for the insights generation
-        const timeout = 30000; // 30 seconds
+        loadingElement.style.display = 'block';
+        contentElement.innerHTML = '';
         
-        const fetchPromise = fetch('/api/generate-insights', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                api_key: anthropicApiKey,
-                balloon_data: balloonData,
-                weather_data: weatherData
-            })
+        console.log('Sending LLM insights request with data:', {
+            balloon_data: JSON.stringify(balloonData).substring(0, 100) + '...',
+            weather_data: weatherData ? JSON.stringify(weatherData).substring(0, 100) + '...' : 'null'
         });
         
-        const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Request timed out after 30 seconds')), timeout);
-        });
-    
-        Promise.race([fetchPromise, timeoutPromise])
-            .then(response => response.json())
-            .then(data => {
-                // Hide loading state
-                document.getElementById('llm-insights-loading').style.display = 'none';
-            // Process response...
-            })
-
-            .catch(error => {
-            console.error('Error generating insights:', error);
-            document.getElementById('llm-insights-loading').style.display = 'none';
-            document.getElementById('llm-insights-content').innerHTML = 
-                `<div class="alert alert-danger">Error generating insights: ${error.message}. Try again or check the API key.</div>`;
-            });
-
-        // Call API to generate insights
+        // Single fetch with timeout
         fetch('/api/generate-insights', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 api_key: anthropicApiKey,
                 balloon_data: balloonData,
-                weather_data: weatherData
+                weather_data: weatherData || {}
             })
         })
-        .then(response => response.json())
+        .then(response => {
+            console.log('Response status:', response.status);
+            if (!response.ok) {
+                throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+            }
+            return response.json();
+        })
         .then(data => {
-            // Hide loading state
-            document.getElementById('llm-insights-loading').style.display = 'none';
+            console.log('Full LLM insights response received:', JSON.stringify(data));
+            
+            // Check if elements still exist (page hasn't changed)
+            if (!loadingElement || !contentElement) {
+                console.error('DOM elements no longer exist');
+                return;
+            }
+            
+            // Hide loading
+            loadingElement.style.display = 'none';
+            
+            // DEBUG: Check the structure of the data
+            console.log('Response has operational_recommendations:', !!data.operational_recommendations);
+            console.log('Response has wind_analysis:', !!data.wind_analysis);
+            console.log('Response has safety_alerts:', !!data.safety_alerts);
+            console.log('Response has performance_analysis:', !!data.performance_analysis);
             
             if (data.error) {
-                document.getElementById('llm-insights-content').innerHTML = 
+                contentElement.innerHTML = 
                     `<div class="alert alert-danger">${data.error}</div>`;
                 return;
             }
             
-            // Format and display insights
+            // Format insights
             let html = '';
             
             // Operational recommendations
@@ -1294,16 +1440,42 @@
                 `;
             }
             
-            document.getElementById('llm-insights-content').innerHTML = html;
+            // If no insights were returned, show a placeholder
+            if (!html) {
+                console.warn('No insights content was generated from the response');
+                html = '<div class="alert alert-info">No insights available at this time. Try refreshing the data.</div>';
+            }
+            
+            contentElement.innerHTML = html;
         })
         .catch(error => {
             console.error('Error generating insights:', error);
             
-            // Hide loading state
-            document.getElementById('llm-insights-loading').style.display = 'none';
+            // Check if elements still exist
+            if (!loadingElement || !contentElement) {
+                console.error('DOM elements no longer exist');
+                return;
+            }
             
-            document.getElementById('llm-insights-content').innerHTML = 
-                `<div class="alert alert-danger">Error generating insights: ${error.message}</div>`;
+            // Hide loading
+            loadingElement.style.display = 'none';
+            
+            // Show error with retry button
+            contentElement.innerHTML = `
+                <div class="alert alert-danger">
+                    Error generating insights: ${error.message}
+                    <div class="mt-2">
+                        <button class="btn btn-sm btn-outline-primary retry-insights-btn">
+                            <i class="bi bi-arrow-clockwise"></i> Retry
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            // Add event listener to retry button
+            document.querySelector('.retry-insights-btn')?.addEventListener('click', function() {
+                generateLLMInsights();
+            });
         });
     }
 </script>
