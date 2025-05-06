@@ -446,7 +446,7 @@
 
             // Add timeout for response
             const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('Request timed out after 5 seconds')), 5000);
+                setTimeout(() => reject(new Error('Request timed out after 30 seconds')), 30000);
             });
 
             Promise.race([fetchPromise, timeoutPromise])
